@@ -727,10 +727,17 @@ ifdef ANDROID
   endif
 endif
 
+# ... and there is no SIMD/ASM support for MIPS Allegrex either.
+ifdef PSP
+  WANT_SIMD=
+endif
+
 ifdef DARWIN
   LIB_EXT = .dylib
 else ifdef WIN32
   LIB_EXT = .dll
+else ifdef PSP
+  LIB_EXT = .a
 else
   LIB_EXT = .so
 endif
