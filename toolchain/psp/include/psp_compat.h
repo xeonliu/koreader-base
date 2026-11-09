@@ -18,4 +18,14 @@
 #define SIGPIPE 13
 #endif
 #define sa_sigaction sa_handler
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#ifdef __cplusplus
+#ifndef SIG_BLOCK
+#define SIG_BLOCK 0
+#define SIG_UNBLOCK 1
+#define SIG_SETMASK 2
+#endif
+#endif
 #endif

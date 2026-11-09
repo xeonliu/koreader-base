@@ -42,6 +42,11 @@ else()
     set(ZLIB ${STAGING_DIR}/lib/libz${LIB_EXT})
 endif()
 
+if(PSP)
+    # newlib hides popen/pclose/fdopen/isascii in C++ mode.
+    list(APPEND CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CXXFLAGS} -include ${BASE_DIR}/toolchain/psp/include/psp_posix_cxx_compat.h")
+endif()
+
 list(APPEND CMAKE_ARGS
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
     # Project options.

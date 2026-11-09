@@ -1,0 +1,29 @@
+--- a/src/x509.c
++++ b/src/x509.c
+@@ -280,7 +280,6 @@
+   int j;
+   int i = -1;
+   int n_general_names;
+-  OTHERNAME *otherName;
+   X509_EXTENSION *extension;
+   GENERAL_NAME *general_name;
+   STACK_OF(GENERAL_NAME) *values;
+@@ -310,17 +309,7 @@
+     for (j = 0; j < n_general_names; j++) {
+       general_name = sk_GENERAL_NAME_value(values, j);
+       switch (general_name->type) {
+-      case GEN_OTHERNAME:
+-        otherName = general_name->d.otherName;
+-        push_asn1_objname(L, otherName->type_id, 1);
+-        if (push_subtable(L, -2)) {
+-          push_asn1_objname(L, otherName->type_id, 0);
+-          lua_setfield(L, -2, "name");
+-        }
+-        push_asn1_string(L, otherName->value->value.asn1_string, px->encode);
+-        lua_rawseti(L, -2, lua_rawlen(L, -2) + 1);
+-        lua_pop(L, 1);
+-        break;
++      /* PSP/wolfSSL: the OpenSSL compat layer has no OTHERNAME: subject-alt-name 'otherName' entries are skipped. */
+       case GEN_DNS:
+         lua_pushstring(L, "dNSName");
+         push_subtable(L, -2);

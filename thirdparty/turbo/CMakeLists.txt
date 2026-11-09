@@ -33,6 +33,17 @@ list(APPEND PATCH_CMD COMMAND rm
 # Some of the LUA files are executables for no good reason.
 list(APPEND PATCH_CMD COMMAND sh -c "chmod a-x turbo/*.lua")
 
+if(PSP)
+    # TLS comes from wolfSSL's OpenSSL compatibility layer (headers/libs installed in staging by the libressl stand-in).
+    list(APPEND CMAKE_ARGS
+        -DOPENSSL_ROOT_DIR=${STAGING_DIR}
+        -DOPENSSL_INCLUDE_DIR=${STAGING_DIR}/include
+        -DOPENSSL_SSL_LIBRARY=${STAGING_DIR}/lib/libssl.a
+        -DOPENSSL_CRYPTO_LIBRARY=${STAGING_DIR}/lib/libcrypto.a
+        "-DCMAKE_C_FLAGS=${CFLAGS} -include wolfssl/options.h -U__INT32_TYPE__ -D__INT32_TYPE__=int -U__UINT32_TYPE__ -D__UINT32_TYPE__=unsigned"
+    )
+endif()
+
 list(APPEND CMAKE_ARGS
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
     -DBUILD_SHARED_LIBS=$<NOT:$<BOOL:${MONOLIBTIC}>>

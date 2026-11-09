@@ -1,3 +1,34 @@
+if(PSP)
+    # PSP: no LibreSSL. pspdev ships wolfSSL (built with its OpenSSL compatibility layer): expose its headers as
+    # <openssl/...> and its library as libssl/libcrypto. The OpenSSL function names that KOReader's FFI uses are
+    # aliased to wolfSSL_* at link time (see utils/gen-psp-symtab.py --alias-prefix).
+    # pkg-config files, so that projects using pkg_check_modules(openssl) find the stand-in.
+    foreach(PC openssl libssl libcrypto)
+        file(WRITE ${STAGING_DIR}/lib/pkgconfig/${PC}.pc
+"prefix=${STAGING_DIR}
+libdir=${STAGING_DIR}/lib
+includedir=${STAGING_DIR}/include
+
+Name: ${PC}
+Description: wolfSSL (OpenSSL compatibility layer) standing in for LibreSSL on the PSP
+Version: 3.0.0
+Libs: -L${STAGING_DIR}/lib -lssl -lcrypto
+Cflags: -I${STAGING_DIR}/include -include wolfssl/options.h
+")
+    endforeach()
+    list(APPEND INSTALL_CMD
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${STAGING_DIR}/include ${STAGING_DIR}/lib
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${PSPDEV}/psp/include/wolfssl/openssl ${STAGING_DIR}/include/openssl
+        COMMAND ${CMAKE_COMMAND} -E copy ${PSPDEV}/psp/lib/libwolfssl.a ${STAGING_DIR}/lib/libssl.a
+        COMMAND ${CMAKE_COMMAND} -E copy ${PSPDEV}/psp/lib/libwolfssl.a ${STAGING_DIR}/lib/libcrypto.a
+    )
+    external_project(
+        BUILD_COMMAND ${CMAKE_COMMAND} -E true
+        INSTALL_COMMAND ${INSTALL_CMD}
+    )
+    return()
+endif()
+
 list(APPEND PATCH_FILES cmake_tweaks.patch)
 if(ANDROID)
     list(APPEND PATCH_FILES android.patch)

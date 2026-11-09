@@ -28,6 +28,13 @@ if(LEGACY)
     list(APPEND CMAKE_ARGS -DZMQ_FORCE_MUTEXES=ON)
 endif()
 
+if(PSP)
+    # newlib hides a few POSIX declarations libzmq uses (signal sets, thread names).
+    list(APPEND CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CXXFLAGS} -include ${BASE_DIR}/toolchain/psp/include/psp_posix_cxx_compat.h")
+    # No thread names on the PSP.
+    list(APPEND CMAKE_ARGS -DZMQ_HAVE_PTHREAD_SETNAME_1=FALSE -DZMQ_HAVE_PTHREAD_SETNAME_2=FALSE -DZMQ_HAVE_PTHREAD_SETNAME_3=FALSE -DZMQ_HAVE_PTHREAD_SET_NAME=FALSE)
+endif()
+
 list(APPEND BUILD_CMD COMMAND ninja)
 
 list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)

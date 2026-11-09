@@ -13,6 +13,13 @@ list(APPEND CMAKE_ARGS
     -DBUILD_SHARED_LIBS=$<NOT:$<BOOL:${MONOLIBTIC}>>
 )
 
+if(PSP)
+    # TLS comes from pspdev's wolfSSL through its OpenSSL compatibility layer (<openssl/...> headers installed by the
+    # `libressl` stand-in project): its configuration (OPENSSL_EXTRA...) lives in <wolfssl/options.h>.
+    list(APPEND PATCH_FILES wolfssl.patch)
+    list(APPEND CMAKE_ARGS "-DCMAKE_C_FLAGS=${CFLAGS} -include ${BASE_DIR}/toolchain/psp/include/psp_luasec_compat.h")
+endif()
+
 list(APPEND BUILD_CMD COMMAND ninja)
 
 if(MONOLIBTIC)

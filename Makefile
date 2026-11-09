@@ -74,7 +74,14 @@ endif
 
 # CMake build interface. {{{
 
-setup $(BUILD_ENTRYPOINT): $(CMAKE_KOVARS) $(CMAKE_TCF) $(MESON_CROSS_TOOLCHAIN) $(MESON_HOST_TOOLCHAIN)
+ifdef PSP
+$(PSP_POSIX_LIB): $(KOR_BASE)/toolchain/psp/src/psp_posix.c
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $(dir $@)psp_posix.o
+	$(AR) rcs $@ $(dir $@)psp_posix.o
+endif
+
+setup $(BUILD_ENTRYPOINT): $(CMAKE_KOVARS) $(CMAKE_TCF) $(MESON_CROSS_TOOLCHAIN) $(MESON_HOST_TOOLCHAIN) $(if $(PSP),$(PSP_POSIX_LIB))
 	$(info ************ Building for MACHINE: "$(MACHINE)" **********)
 	$(info ************ PATH: "$(PATH)" **********)
 	$(info ************ NINJA: $(strip $(NINJA) $(NINJAFLAGS)) ($(NINJA_VERSION)) **********)

@@ -625,7 +625,7 @@ HOSTCFLAGS:=$(BASE_CFLAGS) $(QFLAGS)
 
 ifdef PSP
   # No rpath, dynamic loader or noexecstack handling on PSP: it's a static, single-binary target.
-  LDFLAGS := -Wl,--gc-sections -L$(PSPDEV)/psp/lib -L$(PSPDEV)/psp/sdk/lib $(COMPAT_LDFLAGS)
+  LDFLAGS := -Wl,--gc-sections -L$(abspath $(KOR_BASE)/toolchain/psp/lib) -L$(PSPDEV)/psp/lib -L$(PSPDEV)/psp/sdk/lib $(COMPAT_LDFLAGS)
 else ifndef DARWIN
   LDFLAGS := -Wl,-O1,--as-needed,--gc-sections $(COMPAT_LDFLAGS)
   # To prefer our shipped libraries over the system's,
@@ -800,6 +800,9 @@ endif
 
 # CMake toolchain file. {{{
 
+# PSP: small static library with the POSIX functions newlib lacks (shared by thirdparty executables and the launcher).
+PSP_POSIX_LIB = $(OUTPUT_DIR)/psp-posix/libkopsp.a
+
 CMAKE_TCF = $(CMAKE_DIR)/toolchain.cmake
 CMAKE_FLAGS += -DCMAKE_TOOLCHAIN_FILE='$(abspath $(CMAKE_TCF))'
 
@@ -865,6 +868,8 @@ set(CMAKE_CXX_FLAGS_RELEASE "")
 
 # Linker.
 set(CMAKE_EXE_LINKER_FLAGS_INIT "$(strip $(LDFLAGS))")
+$(if $(PSP),set(CMAKE_C_STANDARD_LIBRARIES "-L$(abspath $(dir $(PSP_POSIX_LIB))) -lkopsp"))
+$(if $(PSP),set(CMAKE_CXX_STANDARD_LIBRARIES "-L$(abspath $(dir $(PSP_POSIX_LIB))) -lkopsp"))
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "$(strip $(filter-out -shared -dynamiclib,$(LDFLAGS) $(DYNLIB_LDFLAGS)))")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT $${CMAKE_SHARED_LINKER_FLAGS_INIT})
 
