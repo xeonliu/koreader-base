@@ -14,6 +14,7 @@ ap.add_argument("out")
 ap.add_argument("--nm", default="psp-nm")
 ap.add_argument("--lua-dir", action="append", default=[])
 ap.add_argument("--extra", action="append", default=[], help="symbols to always export")
+ap.add_argument("--alias-prefix", action="append", default=[], help="export NAME as an alias of PREFIXNAME when NAME itself is not defined (e.g. wolfSSL_ for the OpenSSL API)")
 ap.add_argument("inputs", nargs="+")
 a = ap.parse_args()
 
@@ -38,6 +39,11 @@ for inp in a.inputs:
             defined.setdefault(name, parts[1])
 
 exported = sorted(n for n in defined if n in idents and not n.startswith("luaopen_"))
+aliases = {}   # exported name -> real symbol
+for prefix in a.alias_prefix:
+    for n in sorted(idents):
+        if n not in defined and (prefix + n) in defined and n not in aliases:
+            aliases[n] = prefix + n
 luaopen = sorted(n for n in defined if n.startswith("luaopen_"))
 
 with open(a.out, "w") as f:
@@ -45,9 +51,12 @@ with open(a.out, "w") as f:
     f.write("struct lj_static_sym { const char *name; void *addr; };\n")
     for n in exported:
         f.write(f"extern char {n}[];\n")
+    for n, real in sorted(aliases.items()):
+        f.write(f"extern char {real}[];\n")
     f.write("const struct lj_static_sym lj_static_symtab[] = {\n")
-    for n in exported:                       # sorted() on str == strcmp order for ASCII
-        f.write(f'    {{ "{n}", (void *){n} }},\n')
+    entries = [(n, n) for n in exported] + sorted(aliases.items())
+    for n, real in sorted(entries):          # sorted() on str == strcmp order for ASCII
+        f.write(f'    {{ "{n}", (void *){real} }},\n')
     f.write("    { NULL, NULL }\n};\n\n")
     for n in luaopen:
         f.write(f"extern int {n}(void *L);\n")
@@ -56,4 +65,4 @@ with open(a.out, "w") as f:
     for n in luaopen:
         f.write(f'    {{ "{n}", {n} }},\n')
     f.write("    { NULL, NULL }\n};\n")
-print(f"{len(exported)} ffi symbols, {len(luaopen)} luaopen entry points", file=sys.stderr)
+print(f"{len(exported)} ffi symbols (+{len(aliases)} aliases), {len(luaopen)} luaopen entry points", file=sys.stderr)

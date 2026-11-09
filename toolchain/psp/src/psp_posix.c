@@ -163,20 +163,6 @@ int getrusage(int who, struct rusage *ru) {
     return 0;
 }
 
-/* mkstemp(): create a unique temp file. */
-#include <fcntl.h>
-int mkstemp(char *tmpl) {
-    size_t n = strlen(tmpl);
-    if (n < 6 || strcmp(tmpl + n - 6, "XXXXXX") != 0) { errno = EINVAL; return -1; }
-    static unsigned counter;
-    for (int tries = 0; tries < 1000; tries++) {
-        unsigned v = (unsigned)clock() * 2654435761u + (++counter) * 40503u;
-        for (int i = 0; i < 6; i++) { tmpl[n - 6 + i] = "abcdefghijklmnopqrstuvwxyz012345"[v & 31]; v >>= 5; v ^= counter << i; }
-        int fd = open(tmpl, O_RDWR | O_CREAT | O_EXCL, 0600);
-        if (fd >= 0 || errno != EEXIST) return fd;
-    }
-    return -1;
-}
 int getrlimit(int r, struct rlimit *l) { (void)r; if (l) { l->rlim_cur = RLIM_INFINITY; l->rlim_max = RLIM_INFINITY; } return 0; }
 int setrlimit(int r, const struct rlimit *l) { (void)r; (void)l; return 0; }
 

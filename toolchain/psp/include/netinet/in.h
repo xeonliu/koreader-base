@@ -41,6 +41,7 @@ struct sockaddr_in6 { sa_family_t sin6_family; in_port_t sin6_port; uint32_t sin
 #define IN_CLASSD(a) (((uint32_t)(a) & 0xf0000000) == 0xe0000000)
 #define IN_MULTICAST(a) IN_CLASSD(a)
 #define IN6_IS_ADDR_MULTICAST(a) ((a)->s6_addr[0] == 0xff)
+#define IN6_IS_ADDR_LINKLOCAL(a) ((a)->s6_addr[0] == 0xfe && ((a)->s6_addr[1] & 0xc0) == 0x80)
 #ifdef __cplusplus
 extern "C" {
 #endif
