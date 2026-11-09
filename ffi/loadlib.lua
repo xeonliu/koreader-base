@@ -162,6 +162,11 @@ elseif ffi.os == "Linux" then
     lib_basic_format = "lib%s.so"
     -- Versioned: libz.so.1
     lib_version_format = "lib%s.so.%s"
+elseif ffi.os == "Other" then
+    -- Sony PSP: everything is linked statically (see `lj_clib.c`'s static symbol table): paths are only nominal.
+    lib_search_path = "libs/?"
+    lib_basic_format = "lib%s.so"
+    lib_version_format = "lib%s.so.%s"
 elseif ffi.os == "OSX" then
     -- Apple M1 homebrew installs libraries outside of default search paths,
     -- and dyld environment variables are sip-protected on MacOS, cf.

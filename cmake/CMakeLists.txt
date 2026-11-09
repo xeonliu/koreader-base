@@ -801,6 +801,7 @@ set(VERSIONS
     linux_gnu_arm linux_gnu_arm64 linux_gnu_x64
     linux_musl_arm linux_musl_arm64 linux_musl_x64
     macos
+    other_mipsel
 )
 add_custom_target(
     posix-ffi

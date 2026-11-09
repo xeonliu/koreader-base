@@ -1,3 +1,17 @@
+diff --git a/src/Makefile b/src/Makefile
+index 0b8c04f7..6fb0cb23 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -451,6 +451,9 @@ ifneq (,$(findstring LJ_ABI_SHADOW_STACK 1,$(TARGET_TESTARCH)))
+   DASM_AFLAGS+= -D SHADOW_STACK
+   TARGET_ARCH+= -DLJ_ABI_SHADOW_STACK=1
+ endif
++ifneq (,$(findstring LUAJIT_MIPS_NO_ABICALLS,$(XCFLAGS)))
++  DASM_AFLAGS+= -D MIPS_EABI
++endif
+ DASM_AFLAGS+= -D VER=$(subst LJ_ARCH_VERSION_,,$(filter LJ_ARCH_VERSION_%,$(subst LJ_ARCH_VERSION ,LJ_ARCH_VERSION_,$(TARGET_TESTARCH))))
+ ifeq (Windows,$(TARGET_SYS))
+   DASM_AFLAGS+= -D WIN
 diff --git a/src/host/buildvm_asm.c b/src/host/buildvm_asm.c
 index 8cd8727b..323c8272 100644
 --- a/src/host/buildvm_asm.c
@@ -46,6 +60,33 @@ index 7b7907ef..3c6ca8ff 100644
  #error "Only o32 ABI supported for MIPS32"
  #undef LJ_TARGET_MIPS
  #endif
+diff --git a/src/lj_ccall.h b/src/lj_ccall.h
+index e7c2dc1f..41a35001 100644
+--- a/src/lj_ccall.h
++++ b/src/lj_ccall.h
+@@ -100,12 +100,22 @@ typedef double FPRArg;
+ 
+ #elif LJ_TARGET_MIPS32
+ 
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* PSP (MIPS EABI): 8 argument registers (a0-a7), stack arguments start at sp+0 (no caller-reserved home area). */
++#define CCALL_NARG_GPR		8
++#else
+ #define CCALL_NARG_GPR		4
++#endif
+ #define CCALL_NARG_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
+ #define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
+ #define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++#define CCALL_SPS_EXTRA		4
++#define CCALL_SPS_FREE		0
++#else
+ #define CCALL_SPS_EXTRA		7
+ #define CCALL_SPS_FREE		1
++#endif
+ 
+ typedef intptr_t GPRArg;
+ typedef union FPRArg {
 diff --git a/src/lj_clib.c b/src/lj_clib.c
 index 283b6e42..b18b29a4 100644
 --- a/src/lj_clib.c
@@ -133,7 +174,7 @@ index f560a983..7c8c182f 100644
    __clear_cache(start, end);
  #else
 diff --git a/src/vm_mips.dasc b/src/vm_mips.dasc
-index 40e15e88..312dfcd2 100644
+index 40e15e88..40397589 100644
 --- a/src/vm_mips.dasc
 +++ b/src/vm_mips.dasc
 @@ -107,7 +107,9 @@
@@ -163,3 +204,69 @@ index 40e15e88..312dfcd2 100644
    |  call_intern lj_meta_bitop  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
    |.  move CARG1, L
    |  b ->cont_nop
+@@ -2639,7 +2643,39 @@ static void build_subroutines(BuildCtx *ctx)
+   |.  sra TMP0, ALO, 31
+   |  xor TMP1, ALO, TMP0
+   |  subu TMP1, TMP1, TMP0		// Absolute value in TMP1.
+-  |  clz AHI, TMP1
++  |  // PSP: the Allegrex has its own encoding for clz (not MIPS32's SPECIAL2 one, which is what DynASM emits).
++  |  // Software count-leading-zeros of TMP1 (non-zero) into AHI, using ALO as scratch (its value is dead here).
++  |  move ALO, TMP1
++  |  move AHI, r0
++  |  srl AT, ALO, 16
++  |  bnez AT, >1
++  |.  nop
++  |  sll ALO, ALO, 16
++  |  addiu AHI, AHI, 16
++  |1:
++  |  srl AT, ALO, 24
++  |  bnez AT, >2
++  |.  nop
++  |  sll ALO, ALO, 8
++  |  addiu AHI, AHI, 8
++  |2:
++  |  srl AT, ALO, 28
++  |  bnez AT, >3
++  |.  nop
++  |  sll ALO, ALO, 4
++  |  addiu AHI, AHI, 4
++  |3:
++  |  srl AT, ALO, 30
++  |  bnez AT, >4
++  |.  nop
++  |  sll ALO, ALO, 2
++  |  addiu AHI, AHI, 2
++  |4:
++  |  srl AT, ALO, 31
++  |  bnez AT, >5
++  |.  nop
++  |  addiu AHI, AHI, 1
++  |5:
+   |    andi TMP0, TMP0, 0x800		// Mask sign bit.
+   |  li AT, 0x3ff+31-1
+   |   sllv TMP1, TMP1, AHI		// Align mantissa left with leading 1.
+@@ -3099,7 +3135,11 @@ static void build_subroutines(BuildCtx *ctx)
+   |  sw CCSTATE, -12(TMP2)
+   |  move r16, TMP2
+   |  addiu TMP1, CCSTATE, offsetof(CCallState, stack)
++  |.if MIPS_EABI
++  |  move TMP2, sp			// EABI: stack arguments start at sp+0 (no caller-reserved home area).
++  |.else
+   |  addiu TMP2, sp, 16
++  |.endif
+   |  beqz CARG2, >2
+   |.  addu TMP3, TMP1, CARG2
+   |1:
+@@ -3114,6 +3154,12 @@ static void build_subroutines(BuildCtx *ctx)
+   |  lw CARG2, CCSTATE->gpr[1]
+   |  lw CARG3, CCSTATE->gpr[2]
+   |  lw CARG4, CCSTATE->gpr[3]
++  |.if MIPS_EABI
++  |  lw r8, CCSTATE->gpr[4]		// EABI: a4-a7 = r8-r11.
++  |  lw r9, CCSTATE->gpr[5]
++  |  lw r10, CCSTATE->gpr[6]
++  |  lw r11, CCSTATE->gpr[7]
++  |.endif
+   |  .FPU ldc1 FARG1, CCSTATE->fpr[0]
+   |  .FPU ldc1 FARG2, CCSTATE->fpr[1]
+   |  jalr CFUNCADDR
