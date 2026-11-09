@@ -7,6 +7,10 @@ list(APPEND CMAKE_ARGS
 )
 if(MONOLIBTIC)
     list(APPEND CMAKE_ARGS -DBUILD_SHARED_LIBS=FALSE)
+    if(PSP)
+        # No shared objects on PSP: only build the static library, or both targets output libz.a.
+        list(APPEND CMAKE_ARGS -DZLIB_BUILD_SHARED=OFF -DZLIB_BUILD_STATIC=ON)
+    endif()
 endif()
 
 list(APPEND BUILD_CMD COMMAND ninja)

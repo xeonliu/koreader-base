@@ -185,6 +185,8 @@ if(NOT DEFINED CACHE{LIBC_TYPE})
         set(LIBC_TYPE Bionic CACHE INTERNAL "libc type")
     elseif(APPLE)
         set(LIBC_TYPE macOS CACHE INTERNAL "libc type")
+    elseif(PSP)
+        set(LIBC_TYPE newlib CACHE INTERNAL "libc type")
     else()
         execute_process(COMMAND ${CMAKE_C_COMPILER} -E -P ${CMAKE_CURRENT_SOURCE_DIR}/libc_type_check.c RESULT_VARIABLE RET OUTPUT_VARIABLE OUT OUTPUT_STRIP_TRAILING_WHITESPACE)
         if(NOT RET EQUAL 0 OR NOT OUT MATCHES "(^|\n)libc_type=([A-Za-z]+)$")
@@ -203,7 +205,7 @@ endif()
 # We don't want to rely on `-static-libstdc++`, as it risks breaking the ODR. (Also, it was a pain to deal with because
 # of libtool, c.f., https://www.gnu.org/software/libtool/manual/html_node/Stripped-link-flags.html#Stripped-link-flags).
 #
-if(NOT ((ANDROID AND MONOLIBTIC) OR APPLE OR EMULATE_READER OR USE_SDL))
+if(NOT ((ANDROID AND MONOLIBTIC) OR APPLE OR EMULATE_READER OR PSP OR USE_SDL))
     set(STL_INSTALL_CMD)
     if(ANDROID)
         set(STL_NAME libc++_shared.so)
