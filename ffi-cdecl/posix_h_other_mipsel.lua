@@ -28,7 +28,7 @@ static const unsigned O_CREAT = 512;
 // cdecl_const_O_NONBLOCK
 static const unsigned O_NONBLOCK = 16384;
 // cdecl_const_O_RDONLY
-/* PSP: O_RDONLY not available */
+static const unsigned O_RDONLY = 0;
 // cdecl_const_O_RDWR
 static const unsigned O_RDWR = 2;
 // cdecl_const_O_TRUNC
@@ -36,7 +36,7 @@ static const unsigned O_TRUNC = 1024;
 // cdecl_const_O_WRONLY
 static const unsigned O_WRONLY = 1;
 // cdecl_const_F_OK
-/* PSP: F_OK not available */
+static const unsigned F_OK = 0;
 // cdecl_const_R_OK
 static const unsigned R_OK = 4;
 // cdecl_const_W_OK
@@ -72,23 +72,23 @@ static const unsigned SEEK_CUR = 1;
 // cdecl_const_SEEK_END
 static const unsigned SEEK_END = 2;
 // cdecl_const_SEEK_SET
-/* PSP: SEEK_SET not available */
+static const unsigned SEEK_SET = 0;
 // cdecl_const_PATH_MAX
 static const unsigned PATH_MAX = 1024;
 // cdecl_const_CLOCK_BOOTTIME
-/* PSP: CLOCK_BOOTTIME not available */
+static const unsigned CLOCK_BOOTTIME = 7; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_CLOCK_MONOTONIC
 static const unsigned CLOCK_MONOTONIC = 4;
 // cdecl_const_CLOCK_MONOTONIC_COARSE
-/* PSP: CLOCK_MONOTONIC_COARSE not available */
+static const unsigned CLOCK_MONOTONIC_COARSE = 6; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_CLOCK_REALTIME
 static const unsigned CLOCK_REALTIME = 1;
 // cdecl_const_CLOCK_REALTIME_COARSE
-/* PSP: CLOCK_REALTIME_COARSE not available */
+static const unsigned CLOCK_REALTIME_COARSE = 5; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_type_clockid_t
 typedef int clockid_t;
 // cdecl_const_FIONREAD
-/* PSP: FIONREAD not available */
+static const unsigned FIONREAD = 21531; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_type_suseconds_t
 typedef long suseconds_t;
 // cdecl_type_time_t
@@ -148,27 +148,27 @@ struct statvfs {
   int __f_spare[6];
 };
 // cdecl_const_AF_INET
-/* PSP: AF_INET not available */
+static const unsigned AF_INET = 2; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_AF_INET6
-/* PSP: AF_INET6 not available */
+static const unsigned AF_INET6 = 10; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_AF_PACKET
-/* PSP: AF_PACKET not available */
+static const unsigned AF_PACKET = 17; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_AF_UNIX
-/* PSP: AF_UNIX not available */
+static const unsigned AF_UNIX = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_NI_MAXHOST
-/* PSP: NI_MAXHOST not available */
+static const unsigned NI_MAXHOST = 1025; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_NI_NUMERICHOST
-/* PSP: NI_NUMERICHOST not available */
+static const unsigned NI_NUMERICHOST = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_SOCK_CLOEXEC
-/* PSP: SOCK_CLOEXEC not available */
+static const unsigned SOCK_CLOEXEC = 524288; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_SOCK_DGRAM
-/* PSP: SOCK_DGRAM not available */
+static const unsigned SOCK_DGRAM = 2; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_SOCK_NONBLOCK
-/* PSP: SOCK_NONBLOCK not available */
+static const unsigned SOCK_NONBLOCK = 2048; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_SOCK_RAW
-/* PSP: SOCK_RAW not available */
+static const unsigned SOCK_RAW = 3; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_SOCK_SEQPACKET
-/* PSP: SOCK_SEQPACKET not available */
+static const unsigned SOCK_SEQPACKET = 5; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_type_caddr_t
 typedef char *caddr_t;
 // cdecl_type_in_addr_t
@@ -275,11 +275,11 @@ struct ifreq {
   } ifr_ifru;
 };
 // cdecl_const_SIOCGIWESSID
-/* PSP: SIOCGIWESSID not available */
+static const unsigned SIOCGIWESSID = 35611; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IW_ENCODE_INDEX
-/* PSP: IW_ENCODE_INDEX not available */
+static const unsigned IW_ENCODE_INDEX = 255; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IW_ESSID_MAX_SIZE
-/* PSP: IW_ESSID_MAX_SIZE not available */
+static const unsigned IW_ESSID_MAX_SIZE = 32; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_struct_iw_freq
 struct iw_freq {
   int32_t m;
@@ -346,7 +346,7 @@ mqd_t mq_open(const char *, int, ...);
 // cdecl_func_mq_receive
 ssize_t mq_receive(mqd_t, char *, size_t, unsigned *);
 // cdecl_const_PTHREAD_CREATE_DETACHED
-/* PSP: PTHREAD_CREATE_DETACHED not available */
+static const unsigned PTHREAD_CREATE_DETACHED = 0;
 // cdecl_type_pthread_attr_t
 typedef union {
   char __size[36];
@@ -363,7 +363,7 @@ int pthread_attr_setdetachstate(pthread_attr_t *, int);
 // cdecl_func_pthread_create
 int pthread_create(pthread_t *, const pthread_attr_t *, void *(*)(void *), void *);
 // cdecl_const_SCHED_BATCH
-/* PSP: SCHED_BATCH not available */
+static const unsigned SCHED_BATCH = 3; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_struct_sched_param
 struct sched_param {
   int __sched_priority;
@@ -373,13 +373,13 @@ int sched_setscheduler(pid_t, int, const struct sched_param *);
 // cdecl_func_shm_open
 int shm_open(const char *, int, mode_t);
 // cdecl_const_POLLERR
-/* PSP: POLLERR not available */
+static const unsigned POLLERR = 8; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_POLLHUP
-/* PSP: POLLHUP not available */
+static const unsigned POLLHUP = 16; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_POLLIN
-/* PSP: POLLIN not available */
+static const unsigned POLLIN = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_POLLOUT
-/* PSP: POLLOUT not available */
+static const unsigned POLLOUT = 4; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_struct_pollfd
 struct pollfd {
   int fd;
@@ -429,7 +429,7 @@ int fcntl(int, int, ...);
 // cdecl_func_open
 int open(const char *, int, ...);
 // cdecl_const_HAVE_POSIX_FALLOCATE
-/* PSP: HAVE_POSIX_FALLOCATE not available */
+static const unsigned HAVE_POSIX_FALLOCATE = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_posix_fallocate
 int posix_fallocate(int, off_t, off_t);
 // cdecl_type_FILE
@@ -523,19 +523,19 @@ static const unsigned SIGTERM = 15;
 // cdecl_func_kill
 int kill(pid_t, int);
 // cdecl_const_IFNAMSIZ
-/* PSP: IFNAMSIZ not available */
+static const unsigned IFNAMSIZ = 16; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IFF_LOOPBACK
-/* PSP: IFF_LOOPBACK not available */
+static const unsigned IFF_LOOPBACK = 8; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IFF_UP
-/* PSP: IFF_UP not available */
+static const unsigned IFF_UP = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IPPROTO_IP
-/* PSP: IPPROTO_IP not available */
+static const unsigned IPPROTO_IP = 0; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_IPPROTO_ICMP
-/* PSP: IPPROTO_ICMP not available */
+static const unsigned IPPROTO_ICMP = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_RTF_GATEWAY
-/* PSP: RTF_GATEWAY not available */
+static const unsigned RTF_GATEWAY = 2; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_RTF_UP
-/* PSP: RTF_UP not available */
+static const unsigned RTF_UP = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_connect
 int connect(int, const struct sockaddr *, socklen_t);
 // cdecl_func_recv
@@ -579,19 +579,19 @@ int fchmod(int, mode_t);
 // cdecl_func_stat
 int stat(const char *, struct stat *);
 // cdecl_const_WNOHANG
-/* PSP: WNOHANG not available */
+static const unsigned WNOHANG = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_waitpid
 pid_t waitpid(pid_t, int *, int);
 // cdecl_const_MAP_ANONYMOUS
-/* PSP: MAP_ANONYMOUS not available */
+static const unsigned MAP_ANONYMOUS = 32; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_MAP_FAILED
 static const int MAP_FAILED = -1;
 // cdecl_const_MAP_SHARED
-/* PSP: MAP_SHARED not available */
+static const unsigned MAP_SHARED = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_PROT_READ
-/* PSP: PROT_READ not available */
+static const unsigned PROT_READ = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_PROT_WRITE
-/* PSP: PROT_WRITE not available */
+static const unsigned PROT_WRITE = 2; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_mmap
 void *mmap(void *, size_t, int, int, int, off_t);
 // cdecl_func_munmap
@@ -636,15 +636,15 @@ int gettimeofday(struct timeval *, struct timezone *);
 // cdecl_func_settimeofday
 int settimeofday(const struct timeval *, const struct timezone *);
 // cdecl_const_PRIO_PROCESS
-/* PSP: PRIO_PROCESS not available */
+static const unsigned PRIO_PROCESS = 0; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_PRIO_PGRP
-/* PSP: PRIO_PGRP not available */
+static const unsigned PRIO_PGRP = 1; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_PRIO_USER
-/* PSP: PRIO_USER not available */
+static const unsigned PRIO_USER = 2; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_setpriority
 int setpriority(int, id_t, int);
 // cdecl_const_TCIFLUSH
-/* PSP: TCIFLUSH not available */
+static const unsigned TCIFLUSH = 0; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_func_tcdrain
 int tcdrain(int);
 // cdecl_func_tcflush
@@ -664,9 +664,9 @@ int getifaddrs(struct ifaddrs **);
 // cdecl_func_ioctl
 int ioctl(int, unsigned long, ...);
 // cdecl_const_ICMP_ECHO
-/* PSP: ICMP_ECHO not available */
+static const unsigned ICMP_ECHO = 8; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_ICMP_ECHOREPLY
-/* PSP: ICMP_ECHOREPLY not available */
+static const unsigned ICMP_ECHOREPLY = 0; /* PSP: not defined by the PSP headers, Linux value */
 // cdecl_const_ICMP_MINLEN
-/* PSP: ICMP_MINLEN not available */
+static const unsigned ICMP_MINLEN = 8; /* PSP: not defined by the PSP headers, Linux value */
 ]]

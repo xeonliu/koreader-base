@@ -60,11 +60,43 @@ index 7b7907ef..3c6ca8ff 100644
  #error "Only o32 ABI supported for MIPS32"
  #undef LJ_TARGET_MIPS
  #endif
+diff --git a/src/lj_ccall.c b/src/lj_ccall.c
+index 1aae0d40..4320d3ec 100644
+--- a/src/lj_ccall.c
++++ b/src/lj_ccall.c
+@@ -494,10 +494,27 @@
+     nfpr = CCALL_NARG_FPR; \
+     CCALL_HANDLE_GPR \
+   }
++#elif defined(LUAJIT_MIPS_NO_ABICALLS)	/* PSP: soft-float VM, but hard-float *single* EABI for C calls. */
++#define CCALL_HANDLE_REGARG \
++  if (isfp && n == 1 && nfpr < CCALL_NARG_FPR && !(ct->info & CTF_VARARG)) { \
++    /* Floats go in FPRs (independently of the GPR count in EABI). */ \
++    dp = (void *)&cc->fpr[nfpr].f; \
++    nfpr++; \
++    goto done; \
++  } else { \
++    CCALL_HANDLE_GPR \
++  }
+ #else			/* MIPS32 soft-float */
+ #define CCALL_HANDLE_REGARG CCALL_HANDLE_GPR
+ #endif
+ 
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* Float results come back in f0; double results (software) in v0:v1. */
++#define CCALL_HANDLE_RET \
++  if (ctype_isfp(ctr->info)) \
++    sp = ctr->size == sizeof(float) ? (uint8_t *)&cc->fpr[0].f : (uint8_t *)&cc->gpr[0];
++#endif
++
+ #if !LJ_ABI_SOFTFP
+ /* On MIPS64 soft-float, position of float return values is endian-dependant. */
+ #define CCALL_HANDLE_RET \
 diff --git a/src/lj_ccall.h b/src/lj_ccall.h
-index e7c2dc1f..41a35001 100644
+index e7c2dc1f..e326b4bd 100644
 --- a/src/lj_ccall.h
 +++ b/src/lj_ccall.h
-@@ -100,12 +100,22 @@ typedef double FPRArg;
+@@ -100,12 +100,28 @@ typedef double FPRArg;
  
  #elif LJ_TARGET_MIPS32
  
@@ -74,9 +106,16 @@ index e7c2dc1f..41a35001 100644
 +#else
  #define CCALL_NARG_GPR		4
 +#endif
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* PSP: `float` arguments are passed in FPRs f12..f19 and returned in f0; doubles are software (GPR pairs). */
++#define CCALL_NARG_FPR		8
++#define CCALL_NRET_FPR		1
++#else
  #define CCALL_NARG_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
- #define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
+-#define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
  #define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
++#endif
++#define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
 +#ifdef LUAJIT_MIPS_NO_ABICALLS
 +#define CCALL_SPS_EXTRA		4
 +#define CCALL_SPS_FREE		0
@@ -174,7 +213,7 @@ index f560a983..7c8c182f 100644
    __clear_cache(start, end);
  #else
 diff --git a/src/vm_mips.dasc b/src/vm_mips.dasc
-index 40e15e88..40397589 100644
+index 40e15e88..ecbec473 100644
 --- a/src/vm_mips.dasc
 +++ b/src/vm_mips.dasc
 @@ -107,7 +107,9 @@
@@ -257,7 +296,7 @@ index 40e15e88..40397589 100644
    |  beqz CARG2, >2
    |.  addu TMP3, TMP1, CARG2
    |1:
-@@ -3114,6 +3154,12 @@ static void build_subroutines(BuildCtx *ctx)
+@@ -3114,6 +3154,20 @@ static void build_subroutines(BuildCtx *ctx)
    |  lw CARG2, CCSTATE->gpr[1]
    |  lw CARG3, CCSTATE->gpr[2]
    |  lw CARG4, CCSTATE->gpr[3]
@@ -266,7 +305,25 @@ index 40e15e88..40397589 100644
 +  |  lw r9, CCSTATE->gpr[5]
 +  |  lw r10, CCSTATE->gpr[6]
 +  |  lw r11, CCSTATE->gpr[7]
++  |  lwc1 f12, CCSTATE->fpr[0]		// EABI (single-float): float arguments in f12-f19.
++  |  lwc1 f13, CCSTATE->fpr[1]
++  |  lwc1 f14, CCSTATE->fpr[2]
++  |  lwc1 f15, CCSTATE->fpr[3]
++  |  lwc1 f16, CCSTATE->fpr[4]
++  |  lwc1 f17, CCSTATE->fpr[5]
++  |  lwc1 f18, CCSTATE->fpr[6]
++  |  lwc1 f19, CCSTATE->fpr[7]
 +  |.endif
    |  .FPU ldc1 FARG1, CCSTATE->fpr[0]
    |  .FPU ldc1 FARG2, CCSTATE->fpr[1]
    |  jalr CFUNCADDR
+@@ -3123,6 +3177,9 @@ static void build_subroutines(BuildCtx *ctx)
+   |  lw ra, -4(r16)
+   |  sw CRET1, CCSTATE:TMP1->gpr[0]
+   |  sw CRET2, CCSTATE:TMP1->gpr[1]
++  |.if MIPS_EABI
++  |  swc1 f0, CCSTATE:TMP1->fpr[0]	// EABI (single-float): float result in f0.
++  |.endif
+   |.if FPU
+   |  sdc1 FRET1, CCSTATE:TMP1->fpr[0]
+   |  sdc1 FRET2, CCSTATE:TMP1->fpr[1]

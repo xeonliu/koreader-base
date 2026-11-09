@@ -92,13 +92,10 @@ elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[ static const unsigned O_NONBLOCK = 16384; ]]
 end
 
-if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
-ffi.cdef[[ static const unsigned O_RDONLY = 0; ]]
-elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: O_RDONLY not available */ ]]
-end
-
-ffi.cdef[[ static const unsigned O_RDWR = 2; ]]
+ffi.cdef[[
+static const unsigned O_RDONLY = 0;
+static const unsigned O_RDWR = 2;
+]]
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
 ffi.cdef[[ static const unsigned O_TRUNC = 512; ]]
@@ -106,15 +103,9 @@ elseif --[[ macos|other_mipsel ]] bit.band(platform, 0xc00) ~= 0 then
 ffi.cdef[[ static const unsigned O_TRUNC = 1024; ]]
 end
 
-ffi.cdef[[ static const unsigned O_WRONLY = 1; ]]
-
-if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
-ffi.cdef[[ static const unsigned F_OK = 0; ]]
-elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: F_OK not available */ ]]
-end
-
 ffi.cdef[[
+static const unsigned O_WRONLY = 1;
+static const unsigned F_OK = 0;
 static const unsigned R_OK = 4;
 static const unsigned W_OK = 2;
 static const unsigned X_OK = 1;
@@ -132,13 +123,8 @@ static const unsigned S_IXOTH = 1;
 static const unsigned S_IXUSR = 64;
 static const unsigned SEEK_CUR = 1;
 static const unsigned SEEK_END = 2;
+static const unsigned SEEK_SET = 0;
 ]]
-
-if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
-ffi.cdef[[ static const unsigned SEEK_SET = 0; ]]
-elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: SEEK_SET not available */ ]]
-end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
 ffi.cdef[[ static const unsigned PATH_MAX = 4096; ]]
@@ -160,9 +146,9 @@ static const unsigned CLOCK_MONOTONIC_COARSE = 5;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: CLOCK_BOOTTIME not available */
+static const unsigned CLOCK_BOOTTIME = 7; /* PSP: not defined by the PSP headers, Linux value */
 static const unsigned CLOCK_MONOTONIC = 4;
-/* PSP: CLOCK_MONOTONIC_COARSE not available */
+static const unsigned CLOCK_MONOTONIC_COARSE = 6; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -177,7 +163,7 @@ ffi.cdef[[ static const unsigned CLOCK_REALTIME_COARSE = 5; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const int CLOCK_REALTIME_COARSE = -1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: CLOCK_REALTIME_COARSE not available */ ]]
+ffi.cdef[[ static const unsigned CLOCK_REALTIME_COARSE = 5; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|other_mipsel ]] bit.band(platform, 0xbff) ~= 0 then
@@ -191,7 +177,7 @@ ffi.cdef[[ static const unsigned FIONREAD = 21531; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned FIONREAD = 1074030207; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: FIONREAD not available */ ]]
+ffi.cdef[[ static const unsigned FIONREAD = 21531; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm64|linux_musl_x64|other_mipsel ]] bit.band(platform, 0xb7f) ~= 0 then
@@ -482,7 +468,7 @@ end
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
 ffi.cdef[[ static const unsigned AF_INET = 2; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: AF_INET not available */ ]]
+ffi.cdef[[ static const unsigned AF_INET = 2; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
@@ -490,7 +476,7 @@ ffi.cdef[[ static const unsigned AF_INET6 = 10; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned AF_INET6 = 30; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: AF_INET6 not available */ ]]
+ffi.cdef[[ static const unsigned AF_INET6 = 10; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ macos ]] platform == 0x400 then
@@ -500,13 +486,13 @@ end
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
 ffi.cdef[[ static const unsigned AF_PACKET = 17; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: AF_PACKET not available */ ]]
+ffi.cdef[[ static const unsigned AF_PACKET = 17; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
 ffi.cdef[[ static const unsigned AF_UNIX = 1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: AF_UNIX not available */ ]]
+ffi.cdef[[ static const unsigned AF_UNIX = 1; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|macos ]] bit.band(platform, 0x47f) ~= 0 then
@@ -514,7 +500,7 @@ ffi.cdef[[ static const unsigned NI_MAXHOST = 1025; ]]
 elseif --[[ linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x380) ~= 0 then
 ffi.cdef[[ static const unsigned NI_MAXHOST = 255; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: NI_MAXHOST not available */ ]]
+ffi.cdef[[ static const unsigned NI_MAXHOST = 1025; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|macos ]] bit.band(platform, 0x40f) ~= 0 then
@@ -522,7 +508,7 @@ ffi.cdef[[ static const unsigned NI_NUMERICHOST = 2; ]]
 elseif --[[ linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3f0) ~= 0 then
 ffi.cdef[[ static const unsigned NI_NUMERICHOST = 1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: NI_NUMERICHOST not available */ ]]
+ffi.cdef[[ static const unsigned NI_NUMERICHOST = 1; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
@@ -530,13 +516,13 @@ ffi.cdef[[ static const unsigned SOCK_CLOEXEC = 524288; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned SOCK_CLOEXEC = 0; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: SOCK_CLOEXEC not available */ ]]
+ffi.cdef[[ static const unsigned SOCK_CLOEXEC = 524288; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
 ffi.cdef[[ static const unsigned SOCK_DGRAM = 2; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: SOCK_DGRAM not available */ ]]
+ffi.cdef[[ static const unsigned SOCK_DGRAM = 2; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
@@ -544,7 +530,7 @@ ffi.cdef[[ static const unsigned SOCK_NONBLOCK = 2048; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned SOCK_NONBLOCK = 0; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: SOCK_NONBLOCK not available */ ]]
+ffi.cdef[[ static const unsigned SOCK_NONBLOCK = 2048; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
@@ -554,8 +540,8 @@ static const unsigned SOCK_SEQPACKET = 5;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: SOCK_RAW not available */
-/* PSP: SOCK_SEQPACKET not available */
+static const unsigned SOCK_RAW = 3; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned SOCK_SEQPACKET = 5; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -976,9 +962,9 @@ static const unsigned IW_ESSID_MAX_SIZE = 32;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: SIOCGIWESSID not available */
-/* PSP: IW_ENCODE_INDEX not available */
-/* PSP: IW_ESSID_MAX_SIZE not available */
+static const unsigned SIOCGIWESSID = 35611; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IW_ENCODE_INDEX = 255; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IW_ESSID_MAX_SIZE = 32; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -1056,7 +1042,7 @@ ffi.cdef[[ static const unsigned PTHREAD_CREATE_DETACHED = 1; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned PTHREAD_CREATE_DETACHED = 2; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: PTHREAD_CREATE_DETACHED not available */ ]]
+ffi.cdef[[ static const unsigned PTHREAD_CREATE_DETACHED = 0; ]]
 end
 
 if --[[ macos ]] platform == 0x400 then
@@ -1155,7 +1141,7 @@ end
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3ff) ~= 0 then
 ffi.cdef[[ static const unsigned SCHED_BATCH = 3; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: SCHED_BATCH not available */ ]]
+ffi.cdef[[ static const unsigned SCHED_BATCH = 3; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm64|linux_gnu_x64 ]] bit.band(platform, 0x6f) ~= 0 then
@@ -1210,10 +1196,10 @@ static const unsigned POLLOUT = 4;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: POLLERR not available */
-/* PSP: POLLHUP not available */
-/* PSP: POLLIN not available */
-/* PSP: POLLOUT not available */
+static const unsigned POLLERR = 8; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned POLLHUP = 16; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned POLLIN = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned POLLOUT = 4; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -1264,7 +1250,7 @@ ffi.cdef[[ static const unsigned HAVE_POSIX_FALLOCATE = 0; ]]
 elseif --[[ android_arm64|android_x64|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64 ]] bit.band(platform, 0x3f6) ~= 0 then
 ffi.cdef[[ static const unsigned HAVE_POSIX_FALLOCATE = 1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: HAVE_POSIX_FALLOCATE not available */ ]]
+ffi.cdef[[ static const unsigned HAVE_POSIX_FALLOCATE = 1; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 if --[[ android_arm64|android_x64|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|other_mipsel ]] bit.band(platform, 0xbf6) ~= 0 then
@@ -1347,13 +1333,13 @@ static const unsigned RTF_UP = 1;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: IFNAMSIZ not available */
-/* PSP: IFF_LOOPBACK not available */
-/* PSP: IFF_UP not available */
-/* PSP: IPPROTO_IP not available */
-/* PSP: IPPROTO_ICMP not available */
-/* PSP: RTF_GATEWAY not available */
-/* PSP: RTF_UP not available */
+static const unsigned IFNAMSIZ = 16; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IFF_LOOPBACK = 8; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IFF_UP = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IPPROTO_IP = 0; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned IPPROTO_ICMP = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned RTF_GATEWAY = 2; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned RTF_UP = 1; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -1602,7 +1588,7 @@ int stat(const char *, struct stat *);
 if --[[ android_arm|android_arm64|android_x64|android_x86|linux_gnu_arm|linux_gnu_arm64|linux_gnu_x64|linux_musl_arm|linux_musl_arm64|linux_musl_x64|macos ]] bit.band(platform, 0x7ff) ~= 0 then
 ffi.cdef[[ static const unsigned WNOHANG = 1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: WNOHANG not available */ ]]
+ffi.cdef[[ static const unsigned WNOHANG = 1; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 ffi.cdef[[ pid_t waitpid(pid_t, int *, int); ]]
@@ -1612,7 +1598,7 @@ ffi.cdef[[ static const unsigned MAP_ANONYMOUS = 32; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned MAP_ANONYMOUS = 4096; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: MAP_ANONYMOUS not available */ ]]
+ffi.cdef[[ static const unsigned MAP_ANONYMOUS = 32; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 ffi.cdef[[ static const int MAP_FAILED = -1; ]]
@@ -1625,9 +1611,9 @@ static const unsigned PROT_WRITE = 2;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: MAP_SHARED not available */
-/* PSP: PROT_READ not available */
-/* PSP: PROT_WRITE not available */
+static const unsigned MAP_SHARED = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned PROT_READ = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned PROT_WRITE = 2; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -1709,9 +1695,9 @@ static const unsigned PRIO_USER = 2;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: PRIO_PROCESS not available */
-/* PSP: PRIO_PGRP not available */
-/* PSP: PRIO_USER not available */
+static const unsigned PRIO_PROCESS = 0; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned PRIO_PGRP = 1; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned PRIO_USER = 2; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
 
@@ -1722,7 +1708,7 @@ ffi.cdef[[ static const unsigned TCIFLUSH = 0; ]]
 elseif --[[ macos ]] platform == 0x400 then
 ffi.cdef[[ static const unsigned TCIFLUSH = 1; ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
-ffi.cdef[[ /* PSP: TCIFLUSH not available */ ]]
+ffi.cdef[[ static const unsigned TCIFLUSH = 0; /* PSP: not defined by the PSP headers, Linux value */ ]]
 end
 
 ffi.cdef[[
@@ -1750,8 +1736,8 @@ static const unsigned ICMP_MINLEN = 8;
 ]]
 elseif --[[ other_mipsel ]] platform == 0x800 then
 ffi.cdef[[
-/* PSP: ICMP_ECHO not available */
-/* PSP: ICMP_ECHOREPLY not available */
-/* PSP: ICMP_MINLEN not available */
+static const unsigned ICMP_ECHO = 8; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned ICMP_ECHOREPLY = 0; /* PSP: not defined by the PSP headers, Linux value */
+static const unsigned ICMP_MINLEN = 8; /* PSP: not defined by the PSP headers, Linux value */
 ]]
 end
