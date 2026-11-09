@@ -12,6 +12,14 @@ list(APPEND CMAKE_ARGS
     -DLEPTONICA_PATCH=FALSE
 )
 
+if(PSP)
+    # newlib already declares strlwr()/strupr() (differently typed): rename willuslib's (see the compat header).
+    set(K2_COMPAT "-include ${BASE_DIR}/toolchain/psp/include/psp_k2pdfopt_compat.h")
+    list(APPEND CMAKE_ARGS "-DCMAKE_C_FLAGS=${CFLAGS} ${K2_COMPAT}")
+    # The C++ part (tesscapi.cpp) calls Tesseract's C++ API: it must see the same int32_t as Tesseract itself (name mangling).
+    list(APPEND CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CXXFLAGS} ${K2_COMPAT} -U__INT32_TYPE__ -D__INT32_TYPE__=int -U__UINT32_TYPE__ -D__UINT32_TYPE__=unsigned")
+endif()
+
 list(APPEND BUILD_CMD COMMAND ninja)
 
 list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)

@@ -109,6 +109,13 @@ declare_koreader_target(
     VISIBILITY hidden
 )
 
+function(setup_koreader_djvu)
+    if(PSP)
+        # k2pdfopt's willus.h clashes with newlib's strlwr()/strupr().
+        target_compile_options(koreader-djvu PRIVATE -include ${BASE_DIR}/toolchain/psp/include/psp_k2pdfopt_compat.h)
+    endif()
+endfunction()
+
 # kodeader-input
 set(DEPENDS luajit::luajit)
 if(KINDLE OR REMARKABLE)

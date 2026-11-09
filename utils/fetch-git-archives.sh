@@ -17,6 +17,8 @@ for url in "$@"; do
         echo "skip (unsupported url): $url" >&2; continue
     fi
     ref="${ref%.tar.gz}"
+    # `git describe`-style refs (v0.5.5-24-ga4ab0d4): use the abbreviated commit hash.
+    if [[ "$ref" =~ -g([0-9a-f]+)$ ]]; then ref="${BASH_REMATCH[1]}"; fi
     tmp="$(mktemp -d)"
     echo "== $owner/$repo @ $ref"
     if git clone -q --depth 1 --branch "$ref" "https://github.com/$owner/$repo" "$tmp/src" 2>/dev/null \

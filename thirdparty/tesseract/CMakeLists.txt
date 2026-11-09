@@ -22,6 +22,12 @@ list(APPEND CMAKE_ARGS
     -DINSTALL_CONFIGS=FALSE
 )
 
+if(PSP)
+    # newlib-PSP makes int32_t a `long`, but Tesseract assumes `int32_t` is `int` (std::min, int& binding, ...).
+    # Both are 32 bits wide: redefine the type for this project only.
+    list(APPEND CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CXXFLAGS} -U__INT32_TYPE__ -D__INT32_TYPE__=int -U__UINT32_TYPE__ -D__UINT32_TYPE__=unsigned")
+endif()
+
 list(APPEND BUILD_CMD COMMAND ninja)
 
 list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)
