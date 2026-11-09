@@ -1,3 +1,20 @@
+diff --git a/src/host/buildvm_asm.c b/src/host/buildvm_asm.c
+index 8cd8727b..323c8272 100644
+--- a/src/host/buildvm_asm.c
++++ b/src/host/buildvm_asm.c
+@@ -247,7 +247,12 @@ void emit_asm(BuildCtx *ctx)
+   fprintf(ctx->fp, "\t.module fp=32\n");
+ #endif
+ #if LJ_TARGET_MIPS
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++  /* PSP: everything is non-PIC. A lone .abicalls object makes the linker emit unrelocated PIC call stubs in the PRX. */
++  fprintf(ctx->fp, "\t.set nomips16\n\t.set noreorder\n\t.set nomacro\n");
++#else
+   fprintf(ctx->fp, "\t.set nomips16\n\t.abicalls\n\t.set noreorder\n\t.set nomacro\n");
++#endif
+ #endif
+   emit_asm_align(ctx, 4);
+ 
 diff --git a/src/lj_arch.h b/src/lj_arch.h
 index 7b7907ef..3c6ca8ff 100644
 --- a/src/lj_arch.h
@@ -29,6 +46,19 @@ index 7b7907ef..3c6ca8ff 100644
  #error "Only o32 ABI supported for MIPS32"
  #undef LJ_TARGET_MIPS
  #endif
+diff --git a/src/lj_frame.h b/src/lj_frame.h
+index 556b2a52..ec251e76 100644
+--- a/src/lj_frame.h
++++ b/src/lj_frame.h
+@@ -241,7 +241,7 @@ enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
+ #define CFRAME_OFS_NRES		72
+ #define CFRAME_OFS_PREV		68
+ #define CFRAME_OFS_L		64
+-#define CFRAME_SIZE		64
++#define CFRAME_SIZE		80  /* PSP/EABI: frame owns the 16 byte area above SAVE_GPR_ (was 64). */
+ #endif
+ #define CFRAME_OFS_PC		20
+ #define CFRAME_OFS_MULTRES	16
 diff --git a/src/lj_mcode.c b/src/lj_mcode.c
 index f560a983..7c8c182f 100644
 --- a/src/lj_mcode.c
@@ -43,3 +73,34 @@ index f560a983..7c8c182f 100644
  #elif defined(__GNUC__) || defined(__clang__)
    __clear_cache(start, end);
  #else
+diff --git a/src/vm_mips.dasc b/src/vm_mips.dasc
+index 40e15e88..312dfcd2 100644
+--- a/src/vm_mips.dasc
++++ b/src/vm_mips.dasc
+@@ -107,7 +107,9 @@
+ |
+ |.else			// MIPS32 soft-float
+ |
+-|.define CFRAME_SPACE,	64	// Delta for sp.
++|// NOTE(PSP): the original value is 64, which relies on the o32 ABI's 16 byte argument home area owned
++|// by the caller to hold SAVE_L ... SAVE_ERRF. EABI has no such area, so the interpreter frame owns it.
++|.define CFRAME_SPACE,	80	// Delta for sp.
+ |
+ |.define SAVE_ERRF,	76(sp)	// 32 bit C frame info.
+ |.define SAVE_NRES,	72(sp)
+@@ -944,6 +946,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |  move CARG3, RB
+   |  move CARG4, RC
+   |  sw TMP0, ARG5
++  |  move r8, TMP0			// PSP/EABI: 5th C arg goes in a4 ($8), not on the stack. RB is dead here.
+   |  call_intern lj_meta_arith  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+   |.  move CARG1, L
+   |  // Returns NULL (finished) or TValue * (metamethod).
+@@ -996,6 +999,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |  move CARG3, RB
+   |  move CARG4, RC
+   |  sw TMP0, ARG5
++  |  move r8, TMP0			// PSP/EABI: 5th C arg goes in a4 ($8), not on the stack. RB is dead here.
+   |  call_intern lj_meta_bitop  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+   |.  move CARG1, L
+   |  b ->cont_nop
