@@ -7,6 +7,12 @@ list(APPEND PATCH_FILES koreader-luajit-enable-table_pack.patch)
 # Add libc flavor through `ffi.libc`.
 list(APPEND PATCH_FILES ffi.libc.patch)
 
+if(PSP)
+    # LuaJIT does not support the PSP out of the box: psp-gcc targets MIPS EABI (not o32) and the
+    # Allegrex FPU is single-precision only. Accept the ABI and force the soft-float interpreter.
+    list(APPEND PATCH_FILES psp-eabi-softfp.patch)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Debugging is a go!
     list(APPEND PATCH_CMD COMMAND ${ISED} "s|#CCDEBUG= -g|CCDEBUG= -g|" src/Makefile)
@@ -50,6 +56,12 @@ else()
         set(HOST_CC ${HOSTCC})
     endif()
 
+    set(EXTRA_XCFLAGS)
+    if(PSP)
+        # NOTE: these must go through XCFLAGS, so that the host-side generators see them too.
+        set(EXTRA_XCFLAGS "-DLUAJIT_DISABLE_JIT -DLUAJIT_USE_SYSMALLOC -DLUAJIT_NO_UNWIND -DLUAJIT_SECURITY_PRNG=0")
+    endif()
+
     list(APPEND BUILD_ARGS
         CC=false
         CROSS=${CHOST}-
@@ -62,13 +74,17 @@ else()
         "TARGET_AR=${AR} rcus"
         STATIC_CC=${CC}
         "TARGET_CFLAGS=${CFLAGS} -DLUAJIT_SECURITY_STRHASH=0 -DLUAJIT_SECURITY_STRID=0"
+        "XCFLAGS=${EXTRA_XCFLAGS}"
         TARGET_LD=${CC}
         TARGET_LDFLAGS=${LDFLAGS}
         TARGET_RANLIB=${RANLIB}
         TARGET_SHLDFLAGS=${LDFLAGS}
         TARGET_STRIP=${STRIP}
     )
-    if(ANDROID)
+    if(PSP)
+        # No JIT (soft-float doubles; no executable memory handling), no mmap/dlopen/getrandom: use the system allocator.
+        list(APPEND BUILD_ARGS TARGET_SYS=PSP BUILDMODE=static)
+    elseif(ANDROID)
         list(APPEND BUILD_ARGS TARGET_SYS=Linux)
     elseif(WIN32)
         list(APPEND BUILD_ARGS TARGET_SYS=Windows)

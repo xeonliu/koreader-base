@@ -1,0 +1,45 @@
+diff --git a/src/lj_arch.h b/src/lj_arch.h
+index 7b7907ef..3c6ca8ff 100644
+--- a/src/lj_arch.h
++++ b/src/lj_arch.h
+@@ -435,7 +435,7 @@
+ #endif
+ 
+ #if !defined(LJ_ARCH_HASFPU)
+-#ifdef __mips_soft_float
++#if defined(__mips_soft_float) || defined(__PSP__)
+ #define LJ_ARCH_HASFPU		0
+ #else
+ #define LJ_ARCH_HASFPU		1
+@@ -443,7 +443,7 @@
+ #endif
+ 
+ #if !defined(LJ_ABI_SOFTFP)
+-#ifdef __mips_soft_float
++#if defined(__mips_soft_float) || defined(__PSP__)
+ #define LJ_ABI_SOFTFP		1
+ #else
+ #define LJ_ABI_SOFTFP		0
+@@ -552,7 +552,7 @@
+ #undef LJ_TARGET_PPC
+ #endif
+ #elif LJ_TARGET_MIPS32
+-#if !((defined(_MIPS_SIM_ABI32) && _MIPS_SIM == _MIPS_SIM_ABI32) || (defined(_ABIO32) && _MIPS_SIM == _ABIO32))
++#if !((defined(_MIPS_SIM_ABI32) && _MIPS_SIM == _MIPS_SIM_ABI32) || (defined(_ABIO32) && _MIPS_SIM == _ABIO32)) && !defined(__PSP__)
+ #error "Only o32 ABI supported for MIPS32"
+ #undef LJ_TARGET_MIPS
+ #endif
+diff --git a/src/lj_mcode.c b/src/lj_mcode.c
+index f560a983..7c8c182f 100644
+--- a/src/lj_mcode.c
++++ b/src/lj_mcode.c
+@@ -52,6 +52,9 @@ void lj_mcode_sync(void *start, void *end)
+   sys_icache_invalidate(start, (char *)end-(char *)start);
+ #elif LJ_TARGET_PPC
+   lj_vm_cachesync(start, end);
++#elif defined(__PSP__)
++  /* PSP: no JIT (soft-float interpreter only), nothing to synchronize. */
++  UNUSED(start); UNUSED(end);
+ #elif defined(__GNUC__) || defined(__clang__)
+   __clear_cache(start, end);
+ #else
