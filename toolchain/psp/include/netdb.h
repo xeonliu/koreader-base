@@ -16,7 +16,15 @@ struct hostent { char *h_name; char **h_aliases; int h_addrtype; int h_length; c
 #define NI_MAXSERV 32
 #define NI_NUMERICHOST 1
 #define NI_NUMERICSERV 2
+#define EAI_BADFLAGS -1
 #define EAI_NONAME -2
+#define EAI_SERVICE -8
+#define EAI_SOCKTYPE -7
+#define HOST_NOT_FOUND 1
+#define TRY_AGAIN 2
+#define NO_RECOVERY 3
+#define NO_DATA 4
+extern int h_errno;
 #define EAI_AGAIN -3
 #define EAI_FAIL -4
 #define EAI_FAMILY -6

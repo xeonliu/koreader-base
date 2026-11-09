@@ -211,3 +211,5 @@ const char *inet_ntop(int af, const void *src, char *dst, unsigned size) {
 /* No child processes on the PSP. */
 FILE *popen(const char *cmd, const char *mode) { (void)cmd; (void)mode; errno = ENOSYS; return NULL; }
 int pclose(FILE *f) { (void)f; errno = ECHILD; return -1; }
+
+int h_errno;

@@ -21,7 +21,7 @@ target_sources(luasocket PRIVATE
 )
 if(APPLE)
     target_sources(luasocket PRIVATE src/usocket.c)
-elseif(LINUX)
+elseif(NOT WIN32)
     target_sources(luasocket PRIVATE src/usocket.c)
 elseif(WIN32)
     # TODO
