@@ -81,6 +81,13 @@ download_archive() { (
         return 0
     fi
     mkdir -p "${dest%/*}"
+    # Development-only escape hatch for restricted networks: when `KO_LOCAL_ARCHIVES` points to a directory
+    # holding a file named like the archive, use it instead of downloading (NOT checksum-verified).
+    # See `utils/fetch-git-archives.sh`.
+    if [ -n "${KO_LOCAL_ARCHIVES:-}" ] && [ -f "${KO_LOCAL_ARCHIVES}/${dest##*/}" ]; then
+        echo "WARNING: using local, unverified archive ${KO_LOCAL_ARCHIVES}/${dest##*/}" >&2
+        cp "${KO_LOCAL_ARCHIVES}/${dest##*/}" "${dest}" && return 0
+    fi
     for timeout in 0 2 4; do
         sleep ${timeout}
         for url in "$@"; do

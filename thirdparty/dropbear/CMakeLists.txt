@@ -54,7 +54,7 @@ endif()
 list(APPEND CFG_CMD COMMAND env)
 append_autotools_vars(CFG_CMD)
 list(APPEND CFG_CMD
-    ${SOURCE_DIR}/configure --host=${CHOST}
+    ${SOURCE_DIR}/configure --host=${AUTOTOOLS_HOST}
     --disable-harden
     --disable-lastlog
     --enable-openpty

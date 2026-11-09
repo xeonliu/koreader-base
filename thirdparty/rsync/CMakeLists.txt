@@ -5,7 +5,7 @@ string(APPEND LIBS " ${STAGING_DIR}/lib/libxxhash.a ${STAGING_DIR}/lib/libz.a ${
 list(APPEND CFG_CMD COMMAND env)
 append_autotools_vars(CFG_CMD)
 list(APPEND CFG_CMD
-    ${SOURCE_DIR}/configure --host=${CHOST} --prefix=${STAGING_DIR}
+    ${SOURCE_DIR}/configure --host=${AUTOTOOLS_HOST} --prefix=${STAGING_DIR}
     # Project options.
     --$<IF:$<AND:$<BOOL:${WANT_SIMD}>,$<STREQUAL:${CMAKE_SYSTEM_PROCESSOR},x86_64>>,enable,disable>-md5-asm
     --$<IF:$<BOOL:${WANT_SIMD}>,enable,disable>-roll-asm

@@ -3,7 +3,7 @@ list(APPEND CFG_CMD COMMAND
     -Derror_strings=$<IF:$<STREQUAL:${CMAKE_BUILD_TYPE},Debug>,true,false>
     -Dbrotli=enabled
     -Dharfbuzz=disabled
-    -Dmmap=enabled
+    -Dmmap=$<IF:$<BOOL:${PSP}>,disabled,enabled>
     -Dzlib=system
     ${SOURCE_DIR}
 )

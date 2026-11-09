@@ -298,7 +298,11 @@ ifneq (,$(USE_CLANG))
 else
 	HOSTCC:=$(call ensure_exe_abspath,gcc)
 	HOSTCXX:=$(call ensure_exe_abspath,g++)
-	ifdef CHOST
+	ifdef PSP
+		# Wrappers that strip -fPIC & co (the PSP toolchain only supports non-PIC code).
+		CC:=$(abspath $(KOR_BASE)/toolchain/psp/psp-gcc)
+		CXX:=$(abspath $(KOR_BASE)/toolchain/psp/psp-g++)
+	else ifdef CHOST
 		CC:=$(call ensure_exe_abspath,$(CHOST)-gcc)
 		CXX:=$(call ensure_exe_abspath,$(CHOST)-g++)
 	else
@@ -546,8 +550,10 @@ else ifdef ANDROID
 else ifeq ($(TARGET), psp)
 	# MIPS Allegrex (MIPS32r2 + single precision FPU, no 64-bit FP, no unaligned access).
 	TARGET_CFLAGS:=-G0 -mno-abicalls -fno-pic
-	COMPAT_CFLAGS:=-D__PSP__ -D_PSP_FW_VERSION=661
-	COMPAT_CXXFLAGS:=-D__PSP__ -D_PSP_FW_VERSION=661
+	# NOTE: GCC >= 14 turns a few C warnings into errors that older toolchains (used for the other targets) accept.
+	PSP_COMPAT_FLAGS:=-D__PSP__ -D_PSP_FW_VERSION=661 -isystem $(abspath $(KOR_BASE)/toolchain/psp/include) -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion
+	COMPAT_CFLAGS:=$(PSP_COMPAT_FLAGS)
+	COMPAT_CXXFLAGS:=$(PSP_COMPAT_FLAGS) -fpermissive -include $(abspath $(KOR_BASE)/toolchain/psp/include/psp_compat.h)
 else ifeq ($(TARGET), remarkable)
 	TARGET_CFLAGS:=$(ARMV7_A9_ARCH)
 	TARGET_CFLAGS+=-mfloat-abi=hard
@@ -932,6 +938,8 @@ define cmake_koreader_vars
 set(BASE_CFLAGS    "$(strip $(BASE_CFLAGS))")
 set(CCACHE         "$(strip $(CCACHE))")
 set(CHOST          $(CHOST))
+# Triplet to hand to autotools `--host=` (config.sub does not know about `psp`).
+set(AUTOTOOLS_HOST $(if $(PSP),mipsel-unknown-elf,$(CHOST)))
 set(EMULATE_READER $(EMULATE_READER))
 set(HOSTCC         "$(strip $(CCACHE) $(HOSTCC))")
 set(HOSTCFLAGS     "$(strip $(HOSTCFLAGS))")

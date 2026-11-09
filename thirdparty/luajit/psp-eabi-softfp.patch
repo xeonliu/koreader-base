@@ -46,6 +46,65 @@ index 7b7907ef..3c6ca8ff 100644
  #error "Only o32 ABI supported for MIPS32"
  #undef LJ_TARGET_MIPS
  #endif
+diff --git a/src/lj_clib.c b/src/lj_clib.c
+index 283b6e42..b18b29a4 100644
+--- a/src/lj_clib.c
++++ b/src/lj_clib.c
+@@ -278,6 +278,54 @@ static void *clib_getsym(CLibrary *cl, const char *name)
+   return p;
+ }
+ 
++#elif defined(__PSP__)
++
++/* PSP: there is no dynamic loader. Everything is linked statically, and symbols are resolved against a table
++** generated at link time (see koreader-base `utils/gen-psp-symtab.py`). Library names are ignored: all
++** "libraries" share one global namespace.
++*/
++struct lj_static_sym { const char *name; void *addr; };
++/* Sorted in strcmp() order, terminated by a NULL name. The application provides the real table. */
++extern const struct lj_static_sym lj_static_symtab[];
++__attribute__((weak)) const struct lj_static_sym lj_static_symtab[] = { { NULL, NULL } };
++
++#define CLIB_DEFHANDLE	NULL
++
++LJ_NORET LJ_NOINLINE static void clib_error(lua_State *L, const char *fmt,
++					    const char *name)
++{
++  lj_err_callermsg(L, lj_strfmt_pushf(L, fmt, name, "symbol not found in the static symbol table"));
++}
++
++static void *clib_loadlib(lua_State *L, const char *name, int global)
++{
++  UNUSED(L); UNUSED(name); UNUSED(global);
++  return (void *)(intptr_t)1;  /* Dummy, non-NULL handle. */
++}
++
++static void clib_unloadlib(CLibrary *cl)
++{
++  UNUSED(cl);
++}
++
++static void *clib_getsym(CLibrary *cl, const char *name)
++{
++  const struct lj_static_sym *tab = lj_static_symtab;
++  int lo = 0, hi = 0;
++  UNUSED(cl);
++  /* Hide the table's provenance: the weak default has one element, and the compiler must not assume that. */
++  __asm__ volatile ("" : "+r"(tab));
++  while (tab[hi].name) hi++;
++  hi--;
++  while (lo <= hi) {
++    int mid = (lo + hi) >> 1;
++    int c = strcmp(name, tab[mid].name);
++    if (c == 0) return tab[mid].addr;
++    if (c < 0) hi = mid - 1; else lo = mid + 1;
++  }
++  return NULL;
++}
++
+ #else
+ 
+ #define CLIB_DEFHANDLE	NULL
 diff --git a/src/lj_frame.h b/src/lj_frame.h
 index 556b2a52..ec251e76 100644
 --- a/src/lj_frame.h

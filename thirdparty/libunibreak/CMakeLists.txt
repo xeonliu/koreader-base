@@ -3,7 +3,7 @@ list(APPEND PATCH_FILES trim_the_fat.patch)
 list(APPEND CFG_CMD COMMAND env)
 append_autotools_vars(CFG_CMD)
 list(APPEND CFG_CMD
-    ${SOURCE_DIR}/configure --host=${CHOST} --prefix=${STAGING_DIR}
+    ${SOURCE_DIR}/configure --host=${AUTOTOOLS_HOST} --prefix=${STAGING_DIR}
     --disable-$<IF:$<BOOL:${MONOLIBTIC}>,shared,static>
     --enable-$<IF:$<BOOL:${MONOLIBTIC}>,static,shared>
     --enable-silent-rules

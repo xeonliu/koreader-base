@@ -9,7 +9,7 @@ if(LEGACY OR POCKETBOOK)
 endif()
 append_autotools_vars(CFG_CMD)
 list(APPEND CFG_CMD
-    ${SOURCE_DIR}/configure --host=${CHOST}
+    ${SOURCE_DIR}/configure --host=${AUTOTOOLS_HOST}
     --disable-etc-default-login
     --disable-lastlog
     --without-hardening

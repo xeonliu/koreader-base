@@ -11,6 +11,10 @@ endif()
 option(BUILD_STATIC "build a static library" ${DEFAULT})
 
 foreach(VARIANT SHARED STATIC)
+    # Honor BUILD_SHARED / BUILD_STATIC (shared libraries make no sense on static-only targets like the PSP).
+    if(NOT BUILD_${VARIANT})
+        continue()
+    endif()
     add_library(xxhash_${VARIANT} ${VARIANT})
     set_target_properties(xxhash_${VARIANT} PROPERTIES OUTPUT_NAME xxhash SOVERSION 0)
     target_sources(xxhash_${VARIANT} PRIVATE xxhash.c)
