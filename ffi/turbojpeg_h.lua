@@ -1,77 +1,23 @@
--- Automatically generated with ffi-cdecl.
+local ffi = require("ffi")
 
-require("ffi").cdef[[
-static const unsigned TURBOJPEG_VERSION_NUMBER = 3002000;
-enum TJINIT {
-  TJINIT_COMPRESS,
-  TJINIT_DECOMPRESS,
-  TJINIT_TRANSFORM,
-};
-enum TJSAMP {
-  TJSAMP_444,
-  TJSAMP_422,
-  TJSAMP_420,
-  TJSAMP_GRAY,
-  TJSAMP_440,
-  TJSAMP_411,
-  TJSAMP_441,
-  TJSAMP_410,
-  TJSAMP_24,
-  TJSAMP_UNKNOWN = -1,
-};
+ffi.cdef[[
 enum TJPF {
-  TJPF_RGB,
-  TJPF_BGR,
-  TJPF_RGBX,
-  TJPF_BGRX,
-  TJPF_XBGR,
-  TJPF_XRGB,
-  TJPF_GRAY,
-  TJPF_RGBA,
-  TJPF_BGRA,
-  TJPF_ABGR,
-  TJPF_ARGB,
-  TJPF_CMYK,
-  TJPF_UNKNOWN = -1,
-};
-enum TJPARAM {
-  TJPARAM_STOPONWARNING,
-  TJPARAM_BOTTOMUP,
-  TJPARAM_NOREALLOC,
-  TJPARAM_QUALITY,
-  TJPARAM_SUBSAMP,
-  TJPARAM_JPEGWIDTH,
-  TJPARAM_JPEGHEIGHT,
-  TJPARAM_PRECISION,
-  TJPARAM_COLORSPACE,
-  TJPARAM_FASTUPSAMPLE,
-  TJPARAM_FASTDCT,
-  TJPARAM_OPTIMIZE,
-  TJPARAM_PROGRESSIVE,
-  TJPARAM_SCANLIMIT,
-  TJPARAM_ARITHMETIC,
-  TJPARAM_LOSSLESS,
-  TJPARAM_LOSSLESSPSV,
-  TJPARAM_LOSSLESSPT,
-  TJPARAM_RESTARTBLOCKS,
-  TJPARAM_RESTARTROWS,
-  TJPARAM_XDENSITY,
-  TJPARAM_YDENSITY,
-  TJPARAM_DENSITYUNITS,
-  TJPARAM_MAXMEMORY,
-  TJPARAM_MAXPIXELS,
-  TJPARAM_SAVEMARKERS,
+  TJPF_RGB = 0,
+  TJPF_BGR = 1,
+  TJPF_RGBX = 2,
+  TJPF_BGRX = 3,
+  TJPF_XBGR = 4,
+  TJPF_XRGB = 5,
+  TJPF_GRAY = 6,
+  TJPF_RGBA = 7,
+  TJPF_BGRA = 8,
+  TJPF_ABGR = 9,
+  TJPF_ARGB = 10,
 };
 typedef void *tjhandle;
-tjhandle tj3Init(int);
-tjhandle tj3InitVersion(int, int);
-int tj3Set(tjhandle, int, int);
-int tj3Get(tjhandle, int);
-char *tj3GetErrorStr(tjhandle);
-int tj3Compress8(tjhandle, const unsigned char *, int, int, int, int, unsigned char **, size_t *);
-int tj3DecompressHeader(tjhandle, const unsigned char *, size_t);
-int tj3Decompress8(tjhandle, const unsigned char *, size_t, unsigned char *, int, int);
-void tj3Destroy(tjhandle);
-int tj3SaveImage8(tjhandle, const char *, const unsigned char *, int, int, int, int);
-void tj3Free(void *);
+int tjDestroy(tjhandle);
+tjhandle tjInitDecompress(void);
+int tjDecompressHeader2(tjhandle, unsigned char *, long unsigned int, int *, int *, int *);
+int tjDecompress2(tjhandle, unsigned char *, long unsigned int, unsigned char *, int, int, int, int, int);
+int tjDecompressToYUV(tjhandle, unsigned char *, long unsigned int, unsigned char *, int);
 ]]

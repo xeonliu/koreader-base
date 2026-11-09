@@ -1,7 +1,4 @@
 local ffi = require("ffi")
-local bor = bit.bor
-local C = ffi.C
-
 -- for closing on garbage collection, we need a pointer or aggregate
 -- cdata object (not a plain "int"). So we encapsulate in a struct.
 ffi.cdef[[
@@ -9,7 +6,7 @@ typedef struct light_fd { int ld; } light_fd;
 ]]
 
 -- for ioctl header definition:
-require("ffi/posix_h")
+local dummy = require("ffi/posix_h")
 
 local kobolight = {}
 local kobolight_mt = {__index={}}
@@ -19,8 +16,37 @@ function kobolight_mt.__index:close()
 	-- whole object and not strictly needed.
 	-- it allows to force-close immediately, though.
 	if self.light_fd and self.light_fd.ld ~= -1 then
-		C.close(self.light_fd.ld)
+		ffi.C.close(self.light_fd.ld)
 		self.light_fd.ld = -1
+	end
+end
+
+function kobolight_mt.__index:toggle()
+	if self.isOn then
+		self.savedBrightness = self.brightness
+		self:setBrightness(0)
+	else
+		self:setBrightness(self.savedBrightness or 0)
+	end
+end
+
+function kobolight_mt.__index:sleep()
+	if self.isOn then
+		self.sleepLight = true
+		self:toggle()
+	else
+		self.sleepLight = false
+		-- Because the brightness value cannot be read, the front light
+		-- could be on even is isOn is false. This can happen if the light
+		-- was enabled in e.g. KSM or Nickel before starting KOReader.
+		-- Therefore, always set brightness to 0 just in case.
+		self:setBrightness(0)
+	end
+end
+
+function kobolight_mt.__index:restore()
+	if self.sleepLight then
+		self:toggle()
 	end
 end
 
@@ -28,20 +54,34 @@ function kobolight_mt.__index:setBrightness(brightness)
 	assert(brightness >= 0 and brightness <= 100,
 		"Wrong brightness value given!")
 
-	assert(C.ioctl(self.light_fd.ld, 241, ffi.cast("int", brightness)) == 0,
+	assert(ffi.C.ioctl(self.light_fd.ld, 241, ffi.cast("int", brightness)) == 0,
 		"cannot change brightess value")
+
+	self.brightness = brightness
+	if brightness > 0 then
+		self.isOn = true
+	else
+		self.isOn = false
+	end
+end
+
+function kobolight_mt.__index:restoreBrightness(brightness)
+	self.brightness = brightness
+	self.savedBrightness = brightness
 end
 
 function kobolight.open(device)
 	local light = {
 		light_fd = nil,
+		brightness = 0,
+		isOn = false
 	}
 
-	local ld = C.open(device or "/dev/ntx_io", bor(C.O_RDONLY, C.O_NONBLOCK, C.O_CLOEXEC))
-	assert(ld ~= -1, "cannot open ntx_io character device")
+	local ld = ffi.C.open(device or "/dev/ntx_io", ffi.C.O_RDWR)
+	assert(ld ~= -1, "cannot open light device")
 	light.light_fd = ffi.gc(
 		ffi.new("light_fd", ld),
-		function (light_fd) C.close(light_fd.ld) end
+		function (light_fd) ffi.C.close(light_fd.ld) end
 	)
 
 	setmetatable(light, kobolight_mt)

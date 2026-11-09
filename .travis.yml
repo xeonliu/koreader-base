@@ -1,0 +1,29 @@
+# Travis-CI Build for koreader-base
+# see travis-ci.org for details
+
+language: c
+
+compiler:
+    - gcc
+    - clang
+
+env:
+    - EMULATE_READER=1 USE_NO_CCACHE=1
+
+before_install:
+    - sudo apt-get update
+
+install:
+    - sudo apt-get install libsdl1.2-dev luarocks nasm
+    - git clone https://github.com/Olivine-Labs/busted/
+    - cd busted && git checkout v1.10.0 && sudo luarocks make && cd ..
+
+script:
+    - make fetchthirdparty all
+
+after_success:
+    - wget https://tesseract-ocr.googlecode.com/files/tesseract-ocr-3.02.eng.tar.gz
+    - tar zxf tesseract-ocr-3.02.eng.tar.gz
+    - cd build/* && export TESSDATA_PREFIX=`pwd`/data && mkdir -p data/tessdata
+    - mv ../../tesseract-ocr/tessdata/* data/tessdata/ && cd ../../
+    - make test
