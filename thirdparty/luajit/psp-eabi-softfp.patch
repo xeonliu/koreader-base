@@ -1,0 +1,349 @@
+diff --git a/src/Makefile b/src/Makefile
+index 0b8c04f7..6fb0cb23 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -451,6 +451,9 @@ ifneq (,$(findstring LJ_ABI_SHADOW_STACK 1,$(TARGET_TESTARCH)))
+   DASM_AFLAGS+= -D SHADOW_STACK
+   TARGET_ARCH+= -DLJ_ABI_SHADOW_STACK=1
+ endif
++ifneq (,$(findstring LUAJIT_MIPS_NO_ABICALLS,$(XCFLAGS)))
++  DASM_AFLAGS+= -D MIPS_EABI
++endif
+ DASM_AFLAGS+= -D VER=$(subst LJ_ARCH_VERSION_,,$(filter LJ_ARCH_VERSION_%,$(subst LJ_ARCH_VERSION ,LJ_ARCH_VERSION_,$(TARGET_TESTARCH))))
+ ifeq (Windows,$(TARGET_SYS))
+   DASM_AFLAGS+= -D WIN
+diff --git a/src/host/buildvm_asm.c b/src/host/buildvm_asm.c
+index 8cd8727b..323c8272 100644
+--- a/src/host/buildvm_asm.c
++++ b/src/host/buildvm_asm.c
+@@ -247,7 +247,12 @@ void emit_asm(BuildCtx *ctx)
+   fprintf(ctx->fp, "\t.module fp=32\n");
+ #endif
+ #if LJ_TARGET_MIPS
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++  /* PSP: everything is non-PIC. A lone .abicalls object makes the linker emit unrelocated PIC call stubs in the PRX. */
++  fprintf(ctx->fp, "\t.set nomips16\n\t.set noreorder\n\t.set nomacro\n");
++#else
+   fprintf(ctx->fp, "\t.set nomips16\n\t.abicalls\n\t.set noreorder\n\t.set nomacro\n");
++#endif
+ #endif
+   emit_asm_align(ctx, 4);
+ 
+diff --git a/src/lj_arch.h b/src/lj_arch.h
+index 7b7907ef..3c6ca8ff 100644
+--- a/src/lj_arch.h
++++ b/src/lj_arch.h
+@@ -435,7 +435,7 @@
+ #endif
+ 
+ #if !defined(LJ_ARCH_HASFPU)
+-#ifdef __mips_soft_float
++#if defined(__mips_soft_float) || defined(__PSP__)
+ #define LJ_ARCH_HASFPU		0
+ #else
+ #define LJ_ARCH_HASFPU		1
+@@ -443,7 +443,7 @@
+ #endif
+ 
+ #if !defined(LJ_ABI_SOFTFP)
+-#ifdef __mips_soft_float
++#if defined(__mips_soft_float) || defined(__PSP__)
+ #define LJ_ABI_SOFTFP		1
+ #else
+ #define LJ_ABI_SOFTFP		0
+@@ -552,7 +552,7 @@
+ #undef LJ_TARGET_PPC
+ #endif
+ #elif LJ_TARGET_MIPS32
+-#if !((defined(_MIPS_SIM_ABI32) && _MIPS_SIM == _MIPS_SIM_ABI32) || (defined(_ABIO32) && _MIPS_SIM == _ABIO32))
++#if !((defined(_MIPS_SIM_ABI32) && _MIPS_SIM == _MIPS_SIM_ABI32) || (defined(_ABIO32) && _MIPS_SIM == _ABIO32)) && !defined(__PSP__)
+ #error "Only o32 ABI supported for MIPS32"
+ #undef LJ_TARGET_MIPS
+ #endif
+diff --git a/src/lj_ccall.c b/src/lj_ccall.c
+index 1aae0d40..4320d3ec 100644
+--- a/src/lj_ccall.c
++++ b/src/lj_ccall.c
+@@ -494,10 +494,27 @@
+     nfpr = CCALL_NARG_FPR; \
+     CCALL_HANDLE_GPR \
+   }
++#elif defined(LUAJIT_MIPS_NO_ABICALLS)	/* PSP: soft-float VM, but hard-float *single* EABI for C calls. */
++#define CCALL_HANDLE_REGARG \
++  if (isfp && n == 1 && nfpr < CCALL_NARG_FPR && !(ct->info & CTF_VARARG)) { \
++    /* Floats go in FPRs (independently of the GPR count in EABI). */ \
++    dp = (void *)&cc->fpr[nfpr].f; \
++    nfpr++; \
++    goto done; \
++  } else { \
++    CCALL_HANDLE_GPR \
++  }
+ #else			/* MIPS32 soft-float */
+ #define CCALL_HANDLE_REGARG CCALL_HANDLE_GPR
+ #endif
+ 
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* Float results come back in f0; double results (software) in v0:v1. */
++#define CCALL_HANDLE_RET \
++  if (ctype_isfp(ctr->info)) \
++    sp = ctr->size == sizeof(float) ? (uint8_t *)&cc->fpr[0].f : (uint8_t *)&cc->gpr[0];
++#endif
++
+ #if !LJ_ABI_SOFTFP
+ /* On MIPS64 soft-float, position of float return values is endian-dependant. */
+ #define CCALL_HANDLE_RET \
+diff --git a/src/lj_ccall.h b/src/lj_ccall.h
+index e7c2dc1f..e326b4bd 100644
+--- a/src/lj_ccall.h
++++ b/src/lj_ccall.h
+@@ -100,12 +100,28 @@ typedef double FPRArg;
+ 
+ #elif LJ_TARGET_MIPS32
+ 
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* PSP (MIPS EABI): 8 argument registers (a0-a7), stack arguments start at sp+0 (no caller-reserved home area). */
++#define CCALL_NARG_GPR		8
++#else
+ #define CCALL_NARG_GPR		4
++#endif
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++/* PSP: `float` arguments are passed in FPRs f12..f19 and returned in f0; doubles are software (GPR pairs). */
++#define CCALL_NARG_FPR		8
++#define CCALL_NRET_FPR		1
++#else
+ #define CCALL_NARG_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
+-#define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
+ #define CCALL_NRET_FPR		(LJ_ABI_SOFTFP ? 0 : 2)
++#endif
++#define CCALL_NRET_GPR		(LJ_ABI_SOFTFP ? 4 : 2)
++#ifdef LUAJIT_MIPS_NO_ABICALLS
++#define CCALL_SPS_EXTRA		4
++#define CCALL_SPS_FREE		0
++#else
+ #define CCALL_SPS_EXTRA		7
+ #define CCALL_SPS_FREE		1
++#endif
+ 
+ typedef intptr_t GPRArg;
+ typedef union FPRArg {
+diff --git a/src/lj_clib.c b/src/lj_clib.c
+index 283b6e42..b85f3c28 100644
+--- a/src/lj_clib.c
++++ b/src/lj_clib.c
+@@ -278,6 +278,74 @@ static void *clib_getsym(CLibrary *cl, const char *name)
+   return p;
+ }
+ 
++#elif defined(__PSP__)
++
++/* PSP: there is no dynamic loader. Everything is linked statically, and symbols are resolved against a table
++** generated at link time (see koreader-base `utils/gen-psp-symtab.py`). Library names are ignored: all
++** "libraries" share one global namespace.
++*/
++struct lj_static_sym { const char *name; void *addr; };
++/* Sorted in strcmp() order, terminated by a NULL name. The application provides the real table. */
++extern const struct lj_static_sym lj_static_symtab[];
++__attribute__((weak)) const struct lj_static_sym lj_static_symtab[] = { { NULL, NULL } };
++
++#define CLIB_DEFHANDLE	NULL
++
++LJ_NORET LJ_NOINLINE static void clib_error(lua_State *L, const char *fmt,
++					    const char *name)
++{
++  lj_err_callermsg(L, lj_strfmt_pushf(L, fmt, name, "symbol not found in the static symbol table"));
++}
++
++/* Optional hooks provided by the application, to back "libraries" with PRX modules loaded on demand:
++**   lj_psp_loadlib(name): load whatever implements library `name`; returns a non-NULL handle, or NULL
++**                         (and an error message in *err) when a required module cannot be loaded.
++**   lj_psp_getsym(handle, name): look `name` up in the loaded modules (handle is what loadlib returned,
++**                         or NULL for ffi.C). Return NULL to fall back to the static table.
++*/
++extern void *lj_psp_loadlib(const char *name, const char **err) __attribute__((weak));
++extern void *lj_psp_getsym(void *handle, const char *name) __attribute__((weak));
++
++static void *clib_loadlib(lua_State *L, const char *name, int global)
++{
++  UNUSED(global);
++  if (lj_psp_loadlib) {
++    const char *err = NULL;
++    void *h = lj_psp_loadlib(name, &err);
++    if (!h)
++      lj_err_callermsg(L, lj_strfmt_pushf(L, "cannot load '%s': %s", name, err ? err : "module error"));
++    return h;
++  }
++  UNUSED(L); UNUSED(name);
++  return (void *)(intptr_t)1;  /* Dummy, non-NULL handle. */
++}
++
++static void clib_unloadlib(CLibrary *cl)
++{
++  UNUSED(cl);
++}
++
++static void *clib_getsym(CLibrary *cl, const char *name)
++{
++  const struct lj_static_sym *tab = lj_static_symtab;
++  int lo = 0, hi = 0;
++  if (lj_psp_getsym) {
++    void *p = lj_psp_getsym(cl->handle, name);
++    if (p) return p;
++  }
++  /* Hide the table's provenance: the weak default has one element, and the compiler must not assume that. */
++  __asm__ volatile ("" : "+r"(tab));
++  while (tab[hi].name) hi++;
++  hi--;
++  while (lo <= hi) {
++    int mid = (lo + hi) >> 1;
++    int c = strcmp(name, tab[mid].name);
++    if (c == 0) return tab[mid].addr;
++    if (c < 0) hi = mid - 1; else lo = mid + 1;
++  }
++  return NULL;
++}
++
+ #else
+ 
+ #define CLIB_DEFHANDLE	NULL
+diff --git a/src/lj_frame.h b/src/lj_frame.h
+index 556b2a52..ec251e76 100644
+--- a/src/lj_frame.h
++++ b/src/lj_frame.h
+@@ -241,7 +241,7 @@ enum { LJ_CONT_TAILCALL, LJ_CONT_FFI_CALLBACK };  /* Special continuations. */
+ #define CFRAME_OFS_NRES		72
+ #define CFRAME_OFS_PREV		68
+ #define CFRAME_OFS_L		64
+-#define CFRAME_SIZE		64
++#define CFRAME_SIZE		80  /* PSP/EABI: frame owns the 16 byte area above SAVE_GPR_ (was 64). */
+ #endif
+ #define CFRAME_OFS_PC		20
+ #define CFRAME_OFS_MULTRES	16
+diff --git a/src/lj_mcode.c b/src/lj_mcode.c
+index f560a983..7c8c182f 100644
+--- a/src/lj_mcode.c
++++ b/src/lj_mcode.c
+@@ -52,6 +52,9 @@ void lj_mcode_sync(void *start, void *end)
+   sys_icache_invalidate(start, (char *)end-(char *)start);
+ #elif LJ_TARGET_PPC
+   lj_vm_cachesync(start, end);
++#elif defined(__PSP__)
++  /* PSP: no JIT (soft-float interpreter only), nothing to synchronize. */
++  UNUSED(start); UNUSED(end);
+ #elif defined(__GNUC__) || defined(__clang__)
+   __clear_cache(start, end);
+ #else
+diff --git a/src/vm_mips.dasc b/src/vm_mips.dasc
+index 40e15e88..ecbec473 100644
+--- a/src/vm_mips.dasc
++++ b/src/vm_mips.dasc
+@@ -107,7 +107,9 @@
+ |
+ |.else			// MIPS32 soft-float
+ |
+-|.define CFRAME_SPACE,	64	// Delta for sp.
++|// NOTE(PSP): the original value is 64, which relies on the o32 ABI's 16 byte argument home area owned
++|// by the caller to hold SAVE_L ... SAVE_ERRF. EABI has no such area, so the interpreter frame owns it.
++|.define CFRAME_SPACE,	80	// Delta for sp.
+ |
+ |.define SAVE_ERRF,	76(sp)	// 32 bit C frame info.
+ |.define SAVE_NRES,	72(sp)
+@@ -944,6 +946,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |  move CARG3, RB
+   |  move CARG4, RC
+   |  sw TMP0, ARG5
++  |  move r8, TMP0			// PSP/EABI: 5th C arg goes in a4 ($8), not on the stack. RB is dead here.
+   |  call_intern lj_meta_arith  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+   |.  move CARG1, L
+   |  // Returns NULL (finished) or TValue * (metamethod).
+@@ -996,6 +999,7 @@ static void build_subroutines(BuildCtx *ctx)
+   |  move CARG3, RB
+   |  move CARG4, RC
+   |  sw TMP0, ARG5
++  |  move r8, TMP0			// PSP/EABI: 5th C arg goes in a4 ($8), not on the stack. RB is dead here.
+   |  call_intern lj_meta_bitop  // (lua_State *L, TValue *ra,*rb,*rc, BCReg op)
+   |.  move CARG1, L
+   |  b ->cont_nop
+@@ -2639,7 +2643,39 @@ static void build_subroutines(BuildCtx *ctx)
+   |.  sra TMP0, ALO, 31
+   |  xor TMP1, ALO, TMP0
+   |  subu TMP1, TMP1, TMP0		// Absolute value in TMP1.
+-  |  clz AHI, TMP1
++  |  // PSP: the Allegrex has its own encoding for clz (not MIPS32's SPECIAL2 one, which is what DynASM emits).
++  |  // Software count-leading-zeros of TMP1 (non-zero) into AHI, using ALO as scratch (its value is dead here).
++  |  move ALO, TMP1
++  |  move AHI, r0
++  |  srl AT, ALO, 16
++  |  bnez AT, >1
++  |.  nop
++  |  sll ALO, ALO, 16
++  |  addiu AHI, AHI, 16
++  |1:
++  |  srl AT, ALO, 24
++  |  bnez AT, >2
++  |.  nop
++  |  sll ALO, ALO, 8
++  |  addiu AHI, AHI, 8
++  |2:
++  |  srl AT, ALO, 28
++  |  bnez AT, >3
++  |.  nop
++  |  sll ALO, ALO, 4
++  |  addiu AHI, AHI, 4
++  |3:
++  |  srl AT, ALO, 30
++  |  bnez AT, >4
++  |.  nop
++  |  sll ALO, ALO, 2
++  |  addiu AHI, AHI, 2
++  |4:
++  |  srl AT, ALO, 31
++  |  bnez AT, >5
++  |.  nop
++  |  addiu AHI, AHI, 1
++  |5:
+   |    andi TMP0, TMP0, 0x800		// Mask sign bit.
+   |  li AT, 0x3ff+31-1
+   |   sllv TMP1, TMP1, AHI		// Align mantissa left with leading 1.
+@@ -3099,7 +3135,11 @@ static void build_subroutines(BuildCtx *ctx)
+   |  sw CCSTATE, -12(TMP2)
+   |  move r16, TMP2
+   |  addiu TMP1, CCSTATE, offsetof(CCallState, stack)
++  |.if MIPS_EABI
++  |  move TMP2, sp			// EABI: stack arguments start at sp+0 (no caller-reserved home area).
++  |.else
+   |  addiu TMP2, sp, 16
++  |.endif
+   |  beqz CARG2, >2
+   |.  addu TMP3, TMP1, CARG2
+   |1:
+@@ -3114,6 +3154,20 @@ static void build_subroutines(BuildCtx *ctx)
+   |  lw CARG2, CCSTATE->gpr[1]
+   |  lw CARG3, CCSTATE->gpr[2]
+   |  lw CARG4, CCSTATE->gpr[3]
++  |.if MIPS_EABI
++  |  lw r8, CCSTATE->gpr[4]		// EABI: a4-a7 = r8-r11.
++  |  lw r9, CCSTATE->gpr[5]
++  |  lw r10, CCSTATE->gpr[6]
++  |  lw r11, CCSTATE->gpr[7]
++  |  lwc1 f12, CCSTATE->fpr[0]		// EABI (single-float): float arguments in f12-f19.
++  |  lwc1 f13, CCSTATE->fpr[1]
++  |  lwc1 f14, CCSTATE->fpr[2]
++  |  lwc1 f15, CCSTATE->fpr[3]
++  |  lwc1 f16, CCSTATE->fpr[4]
++  |  lwc1 f17, CCSTATE->fpr[5]
++  |  lwc1 f18, CCSTATE->fpr[6]
++  |  lwc1 f19, CCSTATE->fpr[7]
++  |.endif
+   |  .FPU ldc1 FARG1, CCSTATE->fpr[0]
+   |  .FPU ldc1 FARG2, CCSTATE->fpr[1]
+   |  jalr CFUNCADDR
+@@ -3123,6 +3177,9 @@ static void build_subroutines(BuildCtx *ctx)
+   |  lw ra, -4(r16)
+   |  sw CRET1, CCSTATE:TMP1->gpr[0]
+   |  sw CRET2, CCSTATE:TMP1->gpr[1]
++  |.if MIPS_EABI
++  |  swc1 f0, CCSTATE:TMP1->fpr[0]	// EABI (single-float): float result in f0.
++  |.endif
+   |.if FPU
+   |  sdc1 FRET1, CCSTATE:TMP1->fpr[0]
+   |  sdc1 FRET2, CCSTATE:TMP1->fpr[1]

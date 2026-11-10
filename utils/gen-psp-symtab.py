@@ -14,11 +14,15 @@ ap.add_argument("out")
 ap.add_argument("--nm", default="psp-nm")
 ap.add_argument("--lua-dir", action="append", default=[])
 ap.add_argument("--extra", action="append", default=[], help="symbols to always export")
+ap.add_argument("--extra-file", action="append", default=[], help="file with more symbols to always export (one per line), e.g. the imports of the PRX modules")
 ap.add_argument("--alias-prefix", action="append", default=[], help="export NAME as an alias of PREFIXNAME when NAME itself is not defined (e.g. wolfSSL_ for the OpenSSL API)")
 ap.add_argument("inputs", nargs="+")
 a = ap.parse_args()
 
 idents = set(a.extra)
+for ef in a.extra_file:
+    idents.update(l.strip() for l in open(ef) if l.strip())
+required = set(idents)
 rx = re.compile(rb"[A-Za-z_][A-Za-z0-9_]*")
 for d in a.lua_dir:
     for root, _, files in os.walk(d):
@@ -65,4 +69,7 @@ with open(a.out, "w") as f:
     for n in luaopen:
         f.write(f'    {{ "{n}", {n} }},\n')
     f.write("    { NULL, NULL }\n};\n")
+missing = sorted(n for n in required if n not in defined)
+if missing:
+    print("WARNING: required symbols not found in any input: " + " ".join(missing), file=sys.stderr)
 print(f"{len(exported)} ffi symbols (+{len(aliases)} aliases), {len(luaopen)} luaopen entry points", file=sys.stderr)
