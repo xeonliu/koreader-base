@@ -1,36 +1,42 @@
 #!/usr/bin/env bash
 
 CI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOCKER_HOME=/home/ko
 # shellcheck source=/dev/null
 source "${CI_DIR}/common.sh"
 
-docker-make() {
-    local cmdlist=(
-        'source /home/ko/.bashrc'
-        'cd /home/ko/base'
-        'sudo chown -R ko:ko .'
-        "env MAKEFLAGS='${MAKEFLAGS}' make $(printf '%q ' "$@")"
-    )
-    if [[ -z "${CCACHE_DIR}" ]]; then
-        CCACHE_DIR="$(ccache --get-config cache_dir)"
-    fi
-    mkdir -p "${CCACHE_DIR}"
-    echo "using host cache dir: ${CCACHE_DIR}"
-    sudo chmod -R 777 "${CCACHE_DIR}"
-    DOCKER_HOME=/home/ko
-    DOCKER_CCACHE_DIR="${DOCKER_HOME}/.cache/ccache"
-    echo "using docker cache dir: ${DOCKER_CCACHE_DIR}"
-    docker run --rm -t \
-        -e CCACHE_DIR="${DOCKER_CCACHE_DIR}" \
-        -v "${CCACHE_DIR}:${DOCKER_CCACHE_DIR}" \
-        -v "${PWD}:${DOCKER_HOME}/base" "${DOCKER_IMG}" \
-        /bin/bash -c "$(printf '%s && ' "${cmdlist[@]}")true"
-}
+travis_retry make fetchthirdparty
 
-if [[ -z "${DOCKER_IMG}" ]]; then
-    make TARGET="${TARGET}" "$@"
+if [ "$TARGET" = "kobo" ]; then
+    sudo chmod -R 777 "${HOME}/.ccache"
+    docker run -t \
+        -v "${HOME}/.ccache:${DOCKER_HOME}/.ccache" \
+        -v "$(pwd):${DOCKER_HOME}/base" "${DOCKER_IMG}" \
+        /bin/bash -c 'source /home/ko/.bashrc && cd /home/ko/base && sudo chown -R ko:ko . && make TARGET=kobo all'
+elif [ "$TARGET" = "kindle" ]; then
+    sudo chmod -R 777 "${HOME}/.ccache"
+    docker run -t \
+        -v "${HOME}/.ccache:${DOCKER_HOME}/.ccache" \
+        -v "$(pwd):${DOCKER_HOME}/base" "${DOCKER_IMG}" \
+        /bin/bash -c 'source /home/ko/.bashrc && cd /home/ko/base && sudo chown -R ko:ko . && make TARGET=kindle all'
+elif [ "$TARGET" = "pocketbook" ]; then
+    sudo chmod -R 777 "${HOME}/.ccache"
+    docker run -t \
+        -v "${HOME}/.ccache:${DOCKER_HOME}/.ccache" \
+        -v "$(pwd):${DOCKER_HOME}/base" "${DOCKER_IMG}" \
+        /bin/bash -c "source /home/ko/.bashrc && cd /home/ko/base && sudo chown -R ko:ko . && make VERBOSE=1 TARGET=pocketbook all"
+elif [ "$TARGET" = "sony-prstux" ]; then
+    sudo chmod -R 777 "${HOME}/.ccache"
+    docker run -t \
+        -v "${HOME}/.ccache:${DOCKER_HOME}/.ccache" \
+        -v "$(pwd):${DOCKER_HOME}/base" "${DOCKER_IMG}" \
+        /bin/bash -c "source /home/ko/.bashrc && cd /home/ko/base && sudo chown -R ko:ko . && make VERBOSE=1 TARGET=sony-prstux all"
+elif [ "$TARGET" = "cervantes" ]; then
+    sudo chmod -R 777 "${HOME}/.ccache"
+    docker run -t \
+        -v "${HOME}/.ccache:${DOCKER_HOME}/.ccache" \
+        -v "$(pwd):${DOCKER_HOME}/base" "${DOCKER_IMG}" \
+        /bin/bash -c 'source /home/ko/.bashrc && cd /home/ko/base && sudo chown -R ko:ko . && make TARGET=cervantes all'
 else
-    docker-make TARGET="${TARGET}" VERBOSE=1 "$@"
+    make all
 fi
-
-# vim: sw=4

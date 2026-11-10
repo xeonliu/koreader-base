@@ -1,25 +1,29 @@
-list(APPEND PATCH_FILES luajit.patch)
+PROJECT(lpeg)
+cmake_minimum_required(VERSION 2.8.3)
 
-list(APPEND CMAKE_ARGS
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    -DBUILD_SHARED_LIBS=$<NOT:$<BOOL:${MONOLIBTIC}>>
-)
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
 
-list(APPEND BUILD_CMD COMMAND ninja)
+enable_language(C)
 
-if(MONOLIBTIC)
-    append_install_commands(INSTALL_CMD lpeg.a DESTINATION ${STAGING_DIR}/lib)
-else()
-    append_binary_install_command(INSTALL_CMD lpeg.so DESTINATION common)
-endif()
-append_install_commands(INSTALL_CMD ${SOURCE_DIR}/re.lua DESTINATION common)
+assert_var_defined(CC)
+assert_var_defined(DYNLIB_CFLAGS)
+assert_var_defined(LUA_DIR)
 
-external_project(
-    DOWNLOAD URL c9914cc6036d4afa2f49e5c659a214a5
-    https://github.com/roberto-ieru/LPeg/archive/refs/tags/v1.1.0.tar.gz
-    PATCH_OVERLAY overlay
-    PATCH_FILES ${PATCH_FILES}
-    CMAKE_ARGS ${CMAKE_ARGS}
+# NOTE: probably needs a similar fix as LFS: https://github.com/keplerproject/luafilesystem/commit/a84d81bc52590f930e54f108099df5d155bdc8bf
+set(BUILD_CMD sh -c "${CC} ${DYNLIB_CFLAGS} -I${LUA_DIR}/src -L${LUA_DIR} -lluajit -o lpeg.so lpcap.c lpcode.c lpprint.c lptree.c lpvm.c")
+
+set(LPEG_VER "1.0.1")
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_DIR ${KO_DOWNLOAD_DIR}
+    URL http://www.inf.puc-rio.br/~roberto/lpeg/lpeg-${LPEG_VER}.tar.gz
+    URL_MD5 049e0cc18fd540ccddab701a1d771e46
+    BUILD_IN_SOURCE 1
+    # skip configure
+    CONFIGURE_COMMAND ""
     BUILD_COMMAND ${BUILD_CMD}
-    INSTALL_COMMAND ${INSTALL_CMD}
+    # skip install
+    INSTALL_COMMAND ""
 )

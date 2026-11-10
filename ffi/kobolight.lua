@@ -1,7 +1,5 @@
 local ffi = require("ffi")
-local bor = bit.bor
 local C = ffi.C
-
 -- for closing on garbage collection, we need a pointer or aggregate
 -- cdata object (not a plain "int"). So we encapsulate in a struct.
 ffi.cdef[[
@@ -9,7 +7,7 @@ typedef struct light_fd { int ld; } light_fd;
 ]]
 
 -- for ioctl header definition:
-require("ffi/posix_h")
+local dummy = require("ffi/posix_h")
 
 local kobolight = {}
 local kobolight_mt = {__index={}}
@@ -37,8 +35,8 @@ function kobolight.open(device)
 		light_fd = nil,
 	}
 
-	local ld = C.open(device or "/dev/ntx_io", bor(C.O_RDONLY, C.O_NONBLOCK, C.O_CLOEXEC))
-	assert(ld ~= -1, "cannot open ntx_io character device")
+	local ld = C.open(device or "/dev/ntx_io", C.O_RDWR)
+	assert(ld ~= -1, "cannot open light device")
 	light.light_fd = ffi.gc(
 		ffi.new("light_fd", ld),
 		function (light_fd) C.close(light_fd.ld) end

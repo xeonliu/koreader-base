@@ -1,25 +1,30 @@
--- Automatically generated with ffi-cdecl.
+local ffi = require("ffi")
 
-require("ffi").cdef[[
-static const unsigned GIF_OK = 1;
-static const unsigned GIF_ERROR = 0;
+ffi.cdef[[
+static const int GIF_OK = 1;
+static const int GIF_ERROR = 0;
 typedef int GifWord;
 typedef unsigned char GifByteType;
 typedef struct GifColorType GifColorType;
 struct GifColorType {
-  GifByteType Red, Green, Blue;
+  GifByteType Red;
+  GifByteType Green;
+  GifByteType Blue;
 };
 typedef struct ColorMapObject ColorMapObject;
 struct ColorMapObject {
   int ColorCount;
   int BitsPerPixel;
-  bool SortFlag;
+  _Bool SortFlag;
   GifColorType *Colors;
 };
 typedef struct GifImageDesc GifImageDesc;
 struct GifImageDesc {
-  GifWord Left, Top, Width, Height;
-  bool Interlace;
+  GifWord Left;
+  GifWord Top;
+  GifWord Width;
+  GifWord Height;
+  _Bool Interlace;
   ColorMapObject *ColorMap;
 };
 typedef struct ExtensionBlock ExtensionBlock;
@@ -31,7 +36,7 @@ struct ExtensionBlock {
 typedef struct GraphicsControlBlock GraphicsControlBlock;
 struct GraphicsControlBlock {
   int DisposalMode;
-  bool UserInputFlag;
+  _Bool UserInputFlag;
   int DelayTime;
   int TransparentColor;
 };
@@ -44,7 +49,8 @@ struct SavedImage {
 };
 typedef struct GifFileType GifFileType;
 struct GifFileType {
-  GifWord SWidth, SHeight;
+  GifWord SWidth;
+  GifWord SHeight;
   GifWord SColorResolution;
   GifWord SBackGroundColor;
   GifByteType AspectByte;
@@ -64,10 +70,10 @@ int DGifCloseFile(GifFileType *, int *);
 int DGifSlurp(GifFileType *);
 const char *GifErrorString(int);
 int DGifSavedExtensionToGCB(GifFileType *, int, GraphicsControlBlock *);
-static const unsigned DISPOSAL_UNSPECIFIED = 0;
-static const unsigned DISPOSE_DO_NOT = 1;
-static const unsigned DISPOSE_BACKGROUND = 2;
-static const unsigned DISPOSE_PREVIOUS = 3;
+static const int DISPOSAL_UNSPECIFIED = 0;
+static const int DISPOSE_DO_NOT = 1;
+static const int DISPOSE_BACKGROUND = 2;
+static const int DISPOSE_PREVIOUS = 3;
 static const int NO_TRANSPARENT_COLOR = -1;
 typedef int (*InputFunc)(GifFileType *, GifByteType *, int);
 GifFileType *DGifOpen(void *, InputFunc, int *);

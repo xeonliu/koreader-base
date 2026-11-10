@@ -1,53 +1,60 @@
-list(APPEND PATCH_FILES cmake_tweaks.patch)
-if(LEGACY OR POCKETBOOK)
-    list(APPEND PATCH_FILES disable_eventfd.patch)
+PROJECT(libzmq)
+cmake_minimum_required(VERSION 2.8.3)
+
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
+include("koreader_thirdparty_git")
+
+enable_language(C CXX)
+
+assert_var_defined(CC)
+assert_var_defined(CXX)
+assert_var_defined(CFLAGS)
+assert_var_defined(CXXFLAGS)
+assert_var_defined(LDFLAGS)
+assert_var_defined(STATIC_LIBSTDCPP)
+
+ep_get_source_dir(SOURCE_DIR)
+ep_get_binary_dir(BINARY_DIR)
+
+# added -Wno-unused-result in CXXFLAGS to ignore sodium_init() warning
+set(CFG_ENV_VAR "CC=\"${CC}\" CXX=\"${CXX}\" CFLAGS=\"${CFLAGS}\" CXXFLAGS=\"${CXXFLAGS} -Wno-unused-result\" LDFLAGS=\"${LDFLAGS}\" LIBS=\"${STATIC_LIBSTDCPP}\"")
+set(CFG_ENV_VAR "${CFG_ENV_VAR} libzmq_have_xmlto=no libzmq_have_asciidoc=no")
+
+set(CFG_OPTS "-q --prefix=${BINARY_DIR} --disable-static --enable-shared --without-documentation --host=\"${CHOST}\"")
+if(${LEGACY})
+    set(CFG_OPTS "${CFG_OPTS} --disable-eventfd")
+endif(${LEGACY})
+
+set(CFG_CMD sh -c "${CFG_ENV_VAR} ${SOURCE_DIR}/configure ${CFG_OPTS}")
+set(PATCH_CMD sh -c "${ISED} \"s|-lstdc++||g\" libtool")
+
+if($ENV{ANDROID})
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|version_type=none|version_type=linux|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|need_lib_prefix=no|need_lib_prefix=yes|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|need_version=no|need_version=yes|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|library_names_spec=.*|library_names_spec=\"\\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$versuffix \\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$major \\\\\$libname\\\\\$shared_ext\"|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|soname_spec=.*|soname_spec=\"\\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$major\"|' libtool")
 endif()
 
-list(APPEND CMAKE_ARGS
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    # Project options.
-    -DBUILD_SHARED=$<NOT:$<BOOL:${MONOLIBTIC}>>
-    -DBUILD_STATIC=$<BOOL:${MONOLIBTIC}>
-    -DENABLE_DRAFTS=FALSE
-    -DWITH_DOC=FALSE
-    -DWITH_LIBBSD=FALSE
-    -DZMQ_BUILD_FRAMEWORK=FALSE
-    -DZMQ_BUILD_TESTS=FALSE
-    # Disable some dependencies (which will automatically
-    # disable the corresponding project optional features).
-    -DCMAKE_DISABLE_FIND_PACKAGE_AsciiDoc=TRUE
+set(FORCE_DYNAMLIB_VERSION sh -c "${ISED} \"s|-avoid-version||g\" src/Makefile.am")
+set(SKIP_TEST sh -c "${ISED} \"s|tests||g\" Makefile.am")
+# clear build dir every time so make install won't fail
+set(CLEAR_BUILD_DIR ${CMAKE_COMMAND} -E remove_directory ${BINARY_DIR} COMMAND ${CMAKE_COMMAND} -E make_directory ${BINARY_DIR})
+
+ko_write_gitclone_script(
+    GIT_CLONE_SCRIPT_FILENAME
+    https://github.com/zeromq/libzmq
+    883e95b22e0bffffa72312ea1fec76199afbe458
+    ${SOURCE_DIR}
 )
-if(LEGACY OR POCKETBOOK)
-    list(APPEND CMAKE_ARGS -DPOLLER=epoll)
-endif()
-if(LEGACY)
-    # The legacy Kindle kernels (2.6.26) predate "Clear the exclusive monitor when
-    # returning from an exception" (200b812d00), so the inline LDREX/STREX
-    # atomics std::atomic compiles to on ARMv6 are unreliable across threads.
-    # Use mutexes instead: glibc's go through the kernel's cmpxchg helper.
-    list(APPEND CMAKE_ARGS -DZMQ_FORCE_MUTEXES=ON)
-endif()
 
-if(PSP)
-    # newlib hides a few POSIX declarations libzmq uses (signal sets, thread names).
-    list(APPEND CMAKE_ARGS "-DCMAKE_CXX_FLAGS=${CXXFLAGS} -include ${BASE_DIR}/toolchain/psp/include/psp_posix_cxx_compat.h")
-    # No thread names on the PSP.
-    list(APPEND CMAKE_ARGS -DZMQ_HAVE_PTHREAD_SETNAME_1=FALSE -DZMQ_HAVE_PTHREAD_SETNAME_2=FALSE -DZMQ_HAVE_PTHREAD_SETNAME_3=FALSE -DZMQ_HAVE_PTHREAD_SET_NAME=FALSE)
-endif()
-
-list(APPEND BUILD_CMD COMMAND ninja)
-
-list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)
-
-if(NOT MONOLIBTIC)
-    append_shared_lib_install_commands(INSTALL_CMD zmq VERSION 5)
-endif()
-
-external_project(
-    DOWNLOAD URL ae933b1e98411fd7cb8309f9502d2737
-    https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.tar.gz
-    PATCH_FILES ${PATCH_FILES}
-    CMAKE_ARGS ${CMAKE_ARGS}
-    BUILD_COMMAND ${BUILD_CMD}
-    INSTALL_COMMAND ${INSTALL_CMD}
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -P ${GIT_CLONE_SCRIPT_FILENAME}
+    PATCH_COMMAND ./autogen.sh COMMAND ${FORCE_DYNAMLIB_VERSION} COMMAND ${SKIP_TEST} COMMAND ${CLEAR_BUILD_DIR}
+    CONFIGURE_COMMAND COMMAND ${CFG_CMD} COMMAND ${PATCH_CMD}
+    BUILD_COMMAND $(MAKE) -j${PARALLEL_JOBS} --silent
+    INSTALL_COMMAND $(MAKE) --silent installdirs uninstall install
 )

@@ -1,18 +1,38 @@
 .DS_*
 ._*
-*.AppImage
 *.gz
 *.swp
 *.swo
 cscope.*
+libs-emu
 *.orig
+
+debug-*
+
+lua
+crash.log
+.vimrc
+git-rev
+slider_watcher
+*.o
 tags
+*.sdr
 
 /.cproject
 /.project
 
-/toolchain/android-ndk-r*
-/toolchain/android-sdk-linux
-/build
+toolchain/android-ndk-r*
+toolchain/android-sdk-linux
+toolchain/pocketbook-toolchain
+toolchain/android-toolchain*
+fonts
+/data
+history
+screenshots
+cr3cache
+extr
+build
 
-/thirdparty/**/build
+kpvcrlib/build
+thirdparty/*/build
+kodebug-*

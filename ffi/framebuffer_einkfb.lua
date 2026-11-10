@@ -1,12 +1,14 @@
 local ffi = require("ffi")
-require("ffi/posix_h")
-require("ffi/einkfb_h")
+local BB = require("ffi/blitbuffer")
+local dummy = require("ffi/posix_h")
+local dummy = require("ffi/einkfb_h")
 local C = ffi.C
 
 local framebuffer = {}
 
 local function einkfb_update(fb, refreshtype, x, y, w, h)
-    x, y, w, h = fb.bb:getBoundedRect(x, y, w, h)
+    w, x = BB.checkBounds(w or fb.bb:getWidth(), x or 0, 0, fb.bb:getWidth(), 0xFFFF)
+    h, y = BB.checkBounds(h or fb.bb:getHeight(), y or 0, 0, fb.bb:getHeight(), 0xFFFF)
     x, y, w, h = fb.bb:getPhysicalRect(x, y, w, h)
 
     local refarea = ffi.new("struct update_area_t[1]")
@@ -26,9 +28,7 @@ function framebuffer:refreshPartialImp(x, y, w, h)
 end
 
 function framebuffer:refreshFullImp(x, y, w, h)
-    -- The driver skips an update whose pixels all match what is already on screen, dropping
-    -- explicit full refreshes on an unchanged screen; fx_update_slow is exempt from that check.
-    einkfb_update(self, C.fx_update_slow, x, y, w, h)
+    einkfb_update(self, C.fx_update_full, x, y, w, h)
 end
 
 return require("ffi/framebuffer_linux"):extend(framebuffer)

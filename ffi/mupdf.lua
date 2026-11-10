@@ -16,54 +16,37 @@ require("ffi/posix_h") -- for malloc
 
 local BlitBuffer = require("ffi/blitbuffer")
 
-local C = ffi.C
-local W = ffi.loadlib("wrap-mupdf")
-local M = W
+local M
+if ffi.os == "Windows" then
+    M = ffi.load("libs/libmupdf.dll")
+elseif ffi.os == "OSX" then
+    M = ffi.load("libs/libmupdf.dylib")
+else
+    M = ffi.load("libs/libmupdf.so")
+end
+local W = ffi.load("libs/libwrap-mupdf.so")
 
---- @fixme: Don't make cache_size too low, at least not until we bump MµPDF,
----         as there's a pernicious issue that corrupts its store cache on overcommit on old versions.
----         c.f., https://github.com/koreader/koreader/issues/7627
----         (FZ_STORE_DEFAULT is 256MB, we used to set it to 8MB).
----         And when we bump MµPDF, it'll likely have *more* stuff to store in there,
---          so, don't make that too low, period ;).
---          NOTE: Revisit when we bump MµPDF by doing a few tests with the tracing memory allocators,
---                as even 32MB is likely to be too conservative.
 local mupdf = {
     debug_memory = false,
-    cache_size = 32*1024*1024,
+    cache_size = 8*1024*1024,
+    color = false,
 }
 -- this cannot get adapted by the cdecl file because it is a
 -- string constant. Must match the actual mupdf API:
-local FZ_VERSION = "1.28.6"
+local FZ_VERSION = "1.13.0"
 
 local document_mt = { __index = {} }
 local page_mt = { __index = {} }
+local mupdf_mt = {}
 
 mupdf.debug = function() --[[ no debugging by default ]] end
 
-local function drop_context(ctx)
-    local refcount = ffi.cast("int *", M.fz_user_context(ctx))
-    refcount[0] = refcount[0] - 1
-    if refcount[0] == 0 then
-        M.fz_drop_context(ctx)
-        C.free(refcount)
-    end
-end
-
-local function keep_context(ctx)
-    local refcount = ffi.cast("int *", M.fz_user_context(ctx))
-    refcount[0] = refcount[0] + 1
-    return ctx
-end
-
-local save_ctx = setmetatable({}, {__mode="kv"})
-
+local save_ctx = nil
 -- provides an fz_context for mupdf
 local function context()
-    local ctx = save_ctx[1]
-    if ctx then return ctx end
+    if save_ctx ~= nil then return save_ctx end
 
-    ctx = M.fz_new_context_imp(
+    local ctx = M.fz_new_context_imp(
         mupdf.debug_memory and W.mupdf_get_my_alloc_context() or nil,
         nil,
         mupdf.cache_size, FZ_VERSION)
@@ -72,93 +55,66 @@ local function context()
         error("cannot create fz_context for MuPDF")
     end
 
-    local refcount = ffi.cast("int *", C.malloc(ffi.sizeof("int")))
-    M.fz_set_user_context(ctx, refcount)
-    refcount[0] = 1
+    M.fz_install_external_font_funcs(ctx);
 
-    -- ctx is a cdata<fz_context *>, attach a finalizer to it to release ressources on garbage collection
-    ctx = ffi.gc(ctx, drop_context)
-
-    M.fz_install_external_font_funcs(ctx)
-    M.fz_register_document_handlers(ctx)
-
-    save_ctx[1] = ctx
+    save_ctx = ctx
     return ctx
 end
 
 -- a wrapper for mupdf exception error messages
-local function merror(ctx, message)
-    error(string.format("%s: %s (%d)", message,
-        ffi.string(W.mupdf_error_message(ctx)),
-        W.mupdf_error_code(ctx)))
+local function merror(message)
+    if context() ~= nil then
+        error(string.format("%s: %s (%d)", message,
+            ffi.string(W.mupdf_error_message(context())),
+            W.mupdf_error_code(context())))
+    else
+        error(message)
+    end
 end
 
-local function drop_document(ctx, doc)
-    -- Clear the cdata finalizer to avoid a double-free
-    ffi.gc(doc, nil)
-    M.fz_drop_document(ctx, doc)
-    drop_context(ctx)
-end
-
-local function drop_page(ctx, page)
-    -- Clear the cdata finalizer to avoid a double-free
-    ffi.gc(page, nil)
-    M.fz_drop_page(ctx, page)
-    drop_context(ctx)
+function mupdf_mt.__gc()
+    if save_ctx ~= nil then
+        M.fz_drop_context(save_ctx)
+        save_ctx = nil
+    end
 end
 
 --[[--
 Opens a document.
 --]]
-function mupdf.openDocument(filename)
-    local ctx = context()
+function mupdf.openDocument(filename, cache_size)
+    M.fz_register_document_handlers(context())
+
     local mupdf_doc = {
-        doc = W.mupdf_open_document(ctx, filename),
+        doc = W.mupdf_open_document(context(), filename),
         filename = filename,
     }
 
     if mupdf_doc.doc == nil then
-        merror(ctx, "MuPDF cannot open file.")
+        merror("MuPDF cannot open file.")
     end
-
-    -- doc is a cdata<fz_document *>, attach a finalizer to it to release ressources on garbage collection
-    mupdf_doc.doc = ffi.gc(mupdf_doc.doc, function(doc) drop_document(ctx, doc) end)
-    mupdf_doc.ctx = keep_context(ctx)
 
     setmetatable(mupdf_doc, document_mt)
 
-    if mupdf_doc:getPages() <= 0 then
-        merror(ctx, "MuPDF found no pages in file.")
+    if not (mupdf_doc:getPages() > 0) then
+        merror("MuPDF found no pages in file.")
     end
 
     return mupdf_doc
 end
 
-function mupdf.openDocumentFromText(text, magic, html_resource_directory)
-    local ctx = context()
-    local stream = W.mupdf_open_memory(ctx, ffi.cast("const unsigned char*", text), #text)
+function mupdf.openDocumentFromText(text, magic)
+    M.fz_register_document_handlers(context())
 
-    local archive = nil
-    if html_resource_directory ~= nil then
-        archive = W.mupdf_open_directory(ctx, html_resource_directory)
-    end
-
+    local stream = W.mupdf_open_memory(context(), ffi.cast("const unsigned char*", text), #text)
     local mupdf_doc = {
-        doc = W.mupdf_open_document_with_stream_and_dir(ctx, magic, stream, archive),
+        doc = W.mupdf_open_document_with_stream(context(), magic, stream),
     }
-    M.fz_drop_stream(ctx, stream)
-
-    if archive ~= nil then
-        M.fz_drop_archive(ctx, archive)
-    end
+    W.mupdf_drop_stream(context(), stream)
 
     if mupdf_doc.doc == nil then
-        merror(ctx, "MuPDF cannot open document from text")
+        merror("MuPDF cannot open document from text")
     end
-
-    -- doc is a cdata<fz_document *>, attach a finalizer to it to release ressources on garbage collection
-    mupdf_doc.doc = ffi.gc(mupdf_doc.doc, function(doc) drop_document(ctx, doc) end)
-    mupdf_doc.ctx = keep_context(ctx)
 
     setmetatable(mupdf_doc, document_mt)
 
@@ -175,24 +131,24 @@ triggered explicitly
 --]]
 function document_mt.__index:close()
     if self.doc ~= nil then
-        drop_document(self.ctx, self.doc)
+        M.fz_drop_document(context(), self.doc)
         self.doc = nil
-        self.ctx = nil
     end
 end
+document_mt.__index.__gc = document_mt.__index.close
 
 --[[
 check if the document needs a password for access
 --]]
 function document_mt.__index:needsPassword()
-    return M.fz_needs_password(self.ctx, self.doc) ~= 0
+    return M.fz_needs_password(context(), self.doc) ~= 0
 end
 
 --[[
 try to authenticate with a password
 --]]
 function document_mt.__index:authenticatePassword(password)
-    if M.fz_authenticate_password(self.ctx, self.doc, password) == 0 then
+    if M.fz_authenticate_password(context(), self.doc, password) == 0 then
         return false
     end
     return true
@@ -205,9 +161,9 @@ function document_mt.__index:getPages()
     -- cache number of pages
     if self.number_of_pages then return self.number_of_pages end
 
-    local pages = W.mupdf_count_pages(self.ctx, self.doc)
+    local pages = W.mupdf_count_pages(context(), self.doc)
     if pages == -1 then
-        merror(self.ctx, "cannot access page tree")
+        merror("cannot access page tree")
     end
 
     self.number_of_pages = pages
@@ -215,27 +171,17 @@ function document_mt.__index:getPages()
     return pages
 end
 
-function document_mt.__index:isDocumentReflowable()
-    if self.is_reflowable then return self.is_reflowable end
-    self.is_reflowable = M.fz_is_document_reflowable(self.ctx, self.doc) == 1
-    return self.is_reflowable
-end
-
 function document_mt.__index:layoutDocument(width, height, em)
     -- Reset the cache.
     self.number_of_pages = nil
 
-    W.mupdf_layout_document(self.ctx, self.doc, width, height, em)
-end
-
-function document_mt.__index:setColorRendering(color)
-    self.color = color
+    W.mupdf_layout_document(context(), self.doc, width, height, em)
 end
 
 local function toc_walker(toc, outline, depth)
     while outline ~= nil do
         table.insert(toc, {
-            page = outline.page.page + 1,
+            page = outline.page + 1,
             title = ffi.string(outline.title),
             depth = depth,
         })
@@ -259,10 +205,10 @@ Returns an empty table when there is no ToC
 --]]
 function document_mt.__index:getToc()
     local toc = {}
-    local outline = W.mupdf_load_outline(self.ctx, self.doc)
+    local outline = W.mupdf_load_outline(context(), self.doc)
     if outline ~= nil then
         toc_walker(toc, outline, 1)
-        M.fz_drop_outline(self.ctx, outline)
+        M.fz_drop_outline(context(), outline)
     end
     return toc
 end
@@ -271,43 +217,24 @@ end
 open a page, return page object
 --]]
 function document_mt.__index:openPage(number)
-    local ctx = self.ctx
     local mupdf_page = {
-        page = W.mupdf_load_page(ctx, self.doc, number-1),
+        page = W.mupdf_load_page(context(), self.doc, number-1),
         number = number,
         doc = self,
     }
-
     if mupdf_page.page == nil then
-        merror(ctx, "cannot open page #" .. number)
+        merror("cannot open page #" .. number)
     end
-
-    -- page is a cdata<fz_page *>, attach a finalizer to it to release ressources on garbage collection
-    mupdf_page.page = ffi.gc(mupdf_page.page, function(page) drop_page(ctx, page) end)
-    mupdf_page.ctx = keep_context(ctx)
-
     setmetatable(mupdf_page, page_mt)
-
     return mupdf_page
 end
 
-local function getMetadataInfo(ctx, doc, info)
-    local bufsize = 255
-    local buf = ffi.new("char[?]", bufsize)
-    -- `fz_lookup_metadata` return the number of bytes needed
-    -- to store the string, **including** the null terminator.
-    local res = M.fz_lookup_metadata(ctx, doc, info, buf, bufsize)
-    if res > bufsize then
-        -- Buffer was too small.
-        bufsize = res
-        buf = ffi.new("char[?]", bufsize)
-        res = M.fz_lookup_metadata(ctx, doc, info, buf, bufsize)
+local function getMetadataInfo(doc, info)
+    local buf = ffi.new("char[?]", 255)
+    local res = M.fz_lookup_metadata(context(), doc, info, buf, 255)
+    if res > -1 then
+        return ffi.string(buf, res)
     end
-    if res > 1 then
-        -- Note: strip the null terminator.
-        return ffi.string(buf, res - 1)
-    end
-    -- Empty string or error (-1).
     return ""
 end
 
@@ -317,14 +244,14 @@ Get metadata, return object
 --]]
 function document_mt.__index:getMetadata()
     local metadata = {
-        title = getMetadataInfo(self.ctx, self.doc, "info:Title"),
-        author = getMetadataInfo(self.ctx, self.doc, "info:Author"),
-        subject = getMetadataInfo(self.ctx, self.doc, "info:Subject"),
-        keywords = getMetadataInfo(self.ctx, self.doc, "info:Keywords"),
-        creator = getMetadataInfo(self.ctx, self.doc, "info:Creator"),
-        producer = getMetadataInfo(self.ctx, self.doc, "info:Producer"),
-        creationDate = getMetadataInfo(self.ctx, self.doc, "info:CreationDate"),
-        modDate = getMetadataInfo(self.ctx, self.doc, "info:ModDate")
+        title = getMetadataInfo(self.doc, "info:Title"),
+        author = getMetadataInfo(self.doc, "info:Author"),
+        subject = getMetadataInfo(self.doc, "info:Subject"),
+        keywords = getMetadataInfo(self.doc, "info:Keywords"),
+        creator = getMetadataInfo(self.doc, "info:Creator"),
+        producer = getMetadataInfo(self.doc, "info:Producer"),
+        creationDate = getMetadataInfo(self.doc, "info:CreationDate"),
+        modDate = getMetadataInfo(self.doc, "info:ModDate")
     }
 
     return metadata
@@ -351,14 +278,14 @@ end
 write the document to a new file
 --]]
 function document_mt.__index:writeDocument(filename)
-    local opts = ffi.new("pdf_write_options")
-    opts.do_incremental = (filename == self.filename ) and 1 or 0
-    opts.do_ascii = 0
-    opts.do_garbage = 0
-    opts.do_linear = 0
-    opts.reproducible = 1
-    local ok = W.mupdf_pdf_save_document(self.ctx, ffi.cast("pdf_document*", self.doc), filename, opts)
-    if not ok then merror(self.ctx, "could not write document") end
+    local opts = ffi.new("pdf_write_options[1]")
+    opts[0].do_incremental = (filename == self.filename ) and 1 or 0
+    opts[0].do_ascii = 0
+    opts[0].do_garbage = 0
+    opts[0].do_linear = 0
+    opts[0].continue_on_error = 1
+    local ok = W.mupdf_pdf_save_document(context(), ffi.cast("pdf_document*", self.doc), filename, opts)
+    if ok == nil then merror("could not write document") end
 end
 
 
@@ -371,57 +298,47 @@ this is done implicitly by garbage collection, too.
 --]]
 function page_mt.__index:close()
     if self.page ~= nil then
-        drop_page(self.ctx, self.page)
+        M.fz_drop_page(context(), self.page)
         self.page = nil
-        self.ctx = nil
     end
 end
+page_mt.__index.__gc = page_mt.__index.close
 
 --[[
 calculate page size after applying DrawContext
 --]]
 function page_mt.__index:getSize(draw_context)
-    local bounds = ffi.new("fz_rect")
+    local bounds = ffi.new("fz_rect[1]")
+    local bbox = ffi.new("fz_irect[1]")
     local ctm = ffi.new("fz_matrix")
 
-    W.mupdf_fz_scale(ctm, draw_context.zoom, draw_context.zoom)
-    W.mupdf_fz_pre_rotate(ctm, draw_context.rotate)
+    M.fz_scale(ctm, draw_context.zoom, draw_context.zoom)
+    M.fz_pre_rotate(ctm, draw_context.rotate)
 
-    W.mupdf_fz_bound_page(self.ctx, self.page, bounds)
-    W.mupdf_fz_transform_rect(bounds, ctm)
-
-    -- NOTE: fz_bound_page returns an internal representation computed @ 72dpi...
-    --       It is often superbly mysterious, even for images,
-    --       so we do *NOT* want to round it right now,
-    --       as it would introduce rounding errors much too early in the pipeline...
-    -- NOTE: ReaderZooming uses it to compute the scale factor, where accuracy matters!
-    -- NOTE: This is also used in conjunction with getUsedBBox,
-    --       which also returns precise, floating point rectangles!
-    --[[
+    M.fz_bound_page(context(), self.page, bounds)
+    M.fz_transform_rect(bounds, ctm)
     M.fz_round_rect(bbox, bounds)
-    return bbox[0].x1-bbox[0].x0, bbox[0].y1-bbox[0].y0
-    --]]
 
-    return bounds.x1 - bounds.x0, bounds.y1 - bounds.y0
+    return bbox[0].x1-bbox[0].x0, bbox[0].y1-bbox[0].y0
 end
 
 --[[
 check which part of the page actually contains content
 --]]
 function page_mt.__index:getUsedBBox()
-    local result = ffi.new("fz_rect")
+    local result = ffi.new("fz_rect[1]")
 
-    local dev = W.mupdf_new_bbox_device(self.ctx, result)
-    if dev == nil then merror(self.ctx, "cannot allocate bbox_device") end
-    local ok = W.mupdf_run_page(self.ctx, self.page, dev, M.fz_identity, nil)
-               and W.mupdf_close_device(self.ctx, dev)
-    M.fz_drop_device(self.ctx, dev)
-    if not ok then merror(self.ctx, "cannot calculate bbox for page") end
+    local dev = W.mupdf_new_bbox_device(context(), result)
+    if dev == nil then merror("cannot allocate bbox_device") end
+    local ok = W.mupdf_run_page(context(), self.page, dev, M.fz_identity, nil)
+    M.fz_close_device(context(), dev)
+    M.fz_drop_device(context(), dev)
+    if ok == nil then merror("cannot calculate bbox for page") end
 
-    return result.x0, result.y0, result.x1, result.y1
+    return result[0].x0, result[0].y0, result[0].x1, result[0].y1
 end
 
-local B = string.byte
+local C = string.byte
 local function is_unicode_wspace(c)
     return c == 9 or --  TAB
         c == 0x0a or --  HT
@@ -461,7 +378,7 @@ local function is_unicode_bullet(c)
         c == 0x2043 or --  Hyphen bullet
         c == 0x2219 or --  Bullet operator
         c == 149 or --  Ascii bullet
-        c == B'*'
+        c == C'*'
 end
 
 local function skip_starting_bullet(line)
@@ -503,13 +420,12 @@ will return an empty table if we have no text
 --]]
 function page_mt.__index:getPageText()
     -- first, we run the page through a special device, the text_device
-    local text_page = W.mupdf_new_stext_page_from_page(self.ctx, self.page, nil)
-    if text_page == nil then merror(self.ctx, "cannot alloc text_page") end
+    local text_page = W.mupdf_new_stext_page_from_page(context(), self.page, nil)
+    if text_page == nil then merror("cannot alloc text_page") end
 
     -- now we analyze the data returned by the device and bring it
     -- into the format we want to return
     local lines = {}
-    local size = 0
 
     local block = text_page.first_block
     while block ~= nil do
@@ -518,7 +434,7 @@ function page_mt.__index:getPageText()
             local mupdf_line = block.u.t.first_line
             while mupdf_line ~= nil do
                 local line = {}
-                local line_bbox = ffi.new("fz_rect", M.fz_empty_rect)
+                local line_bbox = ffi.new("fz_rect[1]")
 
                 local first_char = skip_starting_bullet( mupdf_line )
                 local ch = first_char
@@ -536,17 +452,15 @@ function page_mt.__index:getPageText()
                     ch = first_char
                     while ch ~= nil do
                         local textlen = 0
-                        local word_bbox = ffi.new("fz_rect", M.fz_empty_rect)
+                        local word_bbox = ffi.new("fz_rect[1]")
                         while ch ~= nil do
                             if is_unicode_wspace(ch.c) then
                                 -- ignore and end word
                                 break
                             end
                             textlen = textlen + M.fz_runetochar(textbuf + textlen, ch.c)
-                            local char_bbox = ffi.new("fz_rect")
-                            W.mupdf_fz_rect_from_quad(char_bbox, ch.quad)
-                            W.mupdf_fz_union_rect(word_bbox, char_bbox)
-                            W.mupdf_fz_union_rect(line_bbox, char_bbox)
+                            M.fz_union_rect(word_bbox, ch.bbox)
+                            M.fz_union_rect(line_bbox, ch.bbox)
                             if ch.c >= 0x4e00 and ch.c <= 0x9FFF or -- CJK Unified Ideographs
                                 ch.c >= 0x2000 and ch.c <= 0x206F or -- General Punctuation
                                 ch.c >= 0x3000 and ch.c <= 0x303F or -- CJK Symbols and Punctuation
@@ -561,14 +475,11 @@ function page_mt.__index:getPageText()
                             ch = ch.next
                         end
                         -- add word to line
-                        if word_bbox.x0 < word_bbox.x1 and word_bbox.y0 < word_bbox.y1 then
-                            table.insert(line, {
-                                word = ffi.string(textbuf, textlen),
-                                x0 = word_bbox.x0, y0 = word_bbox.y0,
-                                x1 = word_bbox.x1, y1 = word_bbox.y1,
-                            })
-                            size = size + 5 * 8 + textlen
-                        end
+                        table.insert(line, {
+                            word = ffi.string(textbuf, textlen),
+                            x0 = word_bbox[0].x0, y0 = word_bbox[0].y0,
+                            x1 = word_bbox[0].x1, y1 = word_bbox[0].y1,
+                        })
 
                         if ch == nil then
                             break
@@ -577,12 +488,10 @@ function page_mt.__index:getPageText()
                         ch = ch.next
                     end
 
-                    if line_bbox.x0 < line_bbox.x1 and line_bbox.y0 < line_bbox.y1 then
-                        line.x0, line.y0 = line_bbox.x0, line_bbox.y0
-                        line.x1, line.y1 = line_bbox.x1, line_bbox.y1
-                        size = size + 5 * 8
-                        table.insert(lines, line)
-                    end
+                    line.x0, line.y0 = line_bbox[0].x0, line_bbox[0].y0
+                    line.x1, line.y1 = line_bbox[0].x1, line_bbox[0].y1
+
+                    table.insert(lines, line)
                 end
 
                 mupdf_line = mupdf_line.next
@@ -592,53 +501,16 @@ function page_mt.__index:getPageText()
         block = block.next
     end
 
-    -- Rough approximation of size for caching
-    lines.size = size
-
-    M.fz_drop_stext_page(self.ctx, text_page)
+    M.fz_drop_stext_page(context(), text_page)
 
     return lines
-end
-
---[[
-Get a list of matches for the given text on the page, with their coordinates.
-Note: this searches only on the current page, not the whole document.
---]]
-function page_mt.__index:searchPageText(needle, hit_max)
-    if not hit_max then hit_max = 256 end
-    local ctx = self.ctx
-
-    local text_page = W.mupdf_new_stext_page_from_page(ctx, self.page, nil)
-    if text_page == nil then return nil end
-
-    -- Allocations
-    local hits = ffi.new("fz_quad[?]", hit_max)
-    -- local hit_mark = ffi.new("int[?]", hit_max) -- allocate the hit_mark array
-
-    local count = W.mupdf_search_stext_page(ctx, text_page, needle, nil, hits, hit_max)
-
-    M.fz_drop_stext_page(ctx, text_page)
-
-    if count <= 0 then return nil end
-
-    local results = {}
-    for i = 0, count - 1 do
-        table.insert(results, {
-            ul_x = hits[i].ul.x, ul_y = hits[i].ul.y,
-            ur_x = hits[i].ur.x, ur_y = hits[i].ur.y,
-            ll_x = hits[i].ll.x, ll_y = hits[i].ll.y,
-            lr_x = hits[i].lr.x, lr_y = hits[i].lr.y,
-        })
-    end
-
-    return results
 end
 
 --[[
 Get a list of the Hyperlinks on a page
 --]]
 function page_mt.__index:getPageLinks()
-    local page_links = W.mupdf_load_links(self.ctx, self.page)
+    local page_links = W.mupdf_load_links(context(), self.page)
     -- do not error out when page_links == NULL, since there might
     -- simply be no links present.
 
@@ -650,53 +522,31 @@ function page_mt.__index:getPageLinks()
             x0 = link.rect.x0, y0 = link.rect.y0,
             x1 = link.rect.x1, y1 = link.rect.y1,
         }
-        local pos = ffi.new("float[2]")
-        local location = ffi.new("fz_location")
-        W.mupdf_fz_resolve_link(self.ctx, self.doc.doc, link.uri, pos, pos+1, location)
-        -- `fz_resolve_link` return a location of (-1, -1) for external links.
-        if location.chapter == -1 and location.page == -1 then
-            data.uri = ffi.string(link.uri)
+        local page = M.fz_resolve_link(context(), link.doc, link.uri, nil, nil)
+        if page >= 0 then
+            data.page = page -- FIXME page+1?
         else
-            data.page = W.mupdf_fz_page_number_from_location(self.ctx, self.doc.doc, location)
+            data.uri = ffi.string(link.uri)
         end
-        data.pos = {
-            x = pos[0], y = pos[1],
-        }
         table.insert(links, data)
         link = link.next
     end
 
-    M.fz_drop_link(self.ctx, page_links)
+    M.fz_drop_link(context(), page_links)
 
     return links
 end
 
-local function run_page(page, pixmap, ctm, background_cleanup)
-    M.fz_clear_pixmap_with_value(page.ctx, pixmap, 0xff)
+local function run_page(page, pixmap, ctm)
+    M.fz_clear_pixmap_with_value(context(), pixmap, 0xff)
 
-    local dev = W.mupdf_new_draw_device(page.ctx, nil, pixmap)
-    if dev == nil then merror(page.ctx, "cannot create draw device") end
+    local dev = W.mupdf_new_draw_device(context(), nil, pixmap)
+    if dev == nil then merror("cannot create draw device") end
 
-    if background_cleanup and W.mupdf_page_has_transparency_mask(page.ctx, page.page) ~= 0 then
-        local transparency_mask_dev = W.mupdf_new_transparency_mask_device(page.ctx, dev)
-        -- If `mupdf_new_transparency_mask_device` was successful,
-        -- `fz_keep_device(dev)` has been called and `dev`'s
-        -- reference count is now 2. And if an error occurred,
-        -- the count is still 1 and we need to drop the device
-        -- to free it.
-        M.fz_drop_device(page.ctx, dev)
-        if transparency_mask_dev == nil then
-            merror(page.ctx, "cannot create transparency mask device")
-        end
-        dev = transparency_mask_dev
-    end
-
-    local ok = W.mupdf_run_page(page.ctx, page.page, dev, ctm, nil)
-               and W.mupdf_close_device(page.ctx, dev)
-
-    M.fz_drop_device(page.ctx, dev)
-
-    if not ok then merror(page.ctx, "could not run page") end
+    local ok = W.mupdf_run_page(context(), page.page, dev, ctm, nil)
+    M.fz_close_device(context(), dev)
+    M.fz_drop_device(context(), dev)
+    if ok == nil then merror("could not run page") end
 end
 --[[
 render page to blitbuffer
@@ -717,228 +567,81 @@ TODO: make this the used interface
 function page_mt.__index:draw_new(draw_context, width, height, offset_x, offset_y)
     local ctm = ffi.new("fz_matrix")
 
-    W.mupdf_fz_scale(ctm, draw_context.zoom, draw_context.zoom)
-    W.mupdf_fz_pre_rotate(ctm, draw_context.rotate)
-    W.mupdf_fz_pre_translate(ctm, draw_context.offset_x, draw_context.offset_y)
+    M.fz_scale(ctm, draw_context.zoom, draw_context.zoom)
+    M.fz_pre_rotate(ctm, draw_context.rotate)
+    M.fz_pre_translate(ctm, draw_context.offset_x, draw_context.offset_y)
 
-    local bbox = ffi.new("fz_irect", offset_x, offset_y, offset_x + width, offset_y + height)
+    local bbox = ffi.new("fz_irect[1]")
+    bbox[0].x0 = offset_x
+    bbox[0].y0 = offset_y
+    bbox[0].x1 = offset_x + width
+    bbox[0].y1 = offset_y + height
 
-    local bb = BlitBuffer.new(width, height, self.doc.color and BlitBuffer.TYPE_BBRGB32 or BlitBuffer.TYPE_BB8)
+    local bb = BlitBuffer.new(width, height, mupdf.color and BlitBuffer.TYPE_BBRGB32 or BlitBuffer.TYPE_BB8A)
 
-    local colorspace = self.doc.color and M.fz_device_rgb(self.ctx)
-        or M.fz_device_gray(self.ctx)
-    if mupdf.bgr and self.doc.color then
-        colorspace = M.fz_device_bgr(self.ctx)
+    local colorspace = mupdf.color and M.fz_device_rgb(context())
+        or M.fz_device_gray(context())
+    if mupdf.bgr and mupdf.color then
+        colorspace = M.fz_device_bgr(context())
     end
     local pix = W.mupdf_new_pixmap_with_bbox_and_data(
-        self.ctx, colorspace, bbox, nil, self.doc.color and 1 or 0, ffi.cast("unsigned char*", bb.data))
-    if pix == nil then merror(self.ctx, "cannot allocate pixmap") end
+        context(), colorspace, bbox, nil, 1, ffi.cast("unsigned char*", bb.data))
+    if pix == nil then merror("cannot allocate pixmap") end
 
-    run_page(self, pix, ctm, draw_context.background_cleanup)
+    run_page(self, pix, ctm)
 
     if draw_context.gamma >= 0.0 then
-        M.fz_gamma_pixmap(self.ctx, pix, draw_context.gamma)
+        M.fz_gamma_pixmap(context(), pix, draw_context.gamma)
     end
 
-    if draw_context.saturation ~= 1.0 then
-        bb:adjustSaturation(draw_context.saturation)
-    end
-
-    M.fz_drop_pixmap(self.ctx, pix)
+    M.fz_drop_pixmap(context(), pix)
 
     return bb
 end
 
 mupdf.STRIKE_HEIGHT = 0.375
-mupdf.UNDERLINE_HEIGHT = 0
-mupdf.LINE_THICKNESS = 0.05
-mupdf.HIGHLIGHT_COLOR = {1.0, 1.0, 0.0}
-mupdf.UNDERLINE_COLOR = {0.0, 0.0, 1.0}
-mupdf.STRIKE_OUT_COLOR = {1.0, 0.0, 0.0}
+mupdf.UNDERLINE_HEIGHT = 0.075
+mupdf.LINE_THICKNESS = 0.07
 
-function page_mt.__index:addMarkupAnnotation(points, n, type, bb_color)
+function page_mt.__index:addMarkupAnnotation(points, n, type)
     local color = ffi.new("float[3]")
     local alpha = 1.0
+    local line_height = 0.5
+    local line_thickness = 1.0
     if type == M.PDF_ANNOT_HIGHLIGHT then
-        if bb_color then
-            color[0] = bb_color.r / 255
-            color[1] = bb_color.g / 255
-            color[2] = bb_color.b / 255
-        else
-            color[0] = mupdf.HIGHLIGHT_COLOR[1]
-            color[1] = mupdf.HIGHLIGHT_COLOR[2]
-            color[2] = mupdf.HIGHLIGHT_COLOR[3]
-        end
+        color[0] = 1.0
+        color[1] = 1.0
+        color[2] = 0.0
         alpha = 0.5
     elseif type == M.PDF_ANNOT_UNDERLINE then
-        if bb_color then
-            color[0] = bb_color.r / 255
-            color[1] = bb_color.g / 255
-            color[2] = bb_color.b / 255
-        else
-            color[0] = mupdf.UNDERLINE_COLOR[1]
-            color[1] = mupdf.UNDERLINE_COLOR[2]
-            color[2] = mupdf.UNDERLINE_COLOR[3]
-        end
-    elseif type == M.PDF_ANNOT_STRIKE_OUT then
-        if bb_color then
-            color[0] = bb_color.r / 255
-            color[1] = bb_color.g / 255
-            color[2] = bb_color.b / 255
-        else
-            color[0] = mupdf.STRIKE_OUT_COLOR[1]
-            color[1] = mupdf.STRIKE_OUT_COLOR[2]
-            color[2] = mupdf.STRIKE_OUT_COLOR[3]
-        end
+        color[0] = 0.0
+        color[1] = 0.0
+        color[2] = 1.0
+        line_thickness = mupdf.LINE_THICKNESS
+        line_height = mupdf.UNDERLINE_HEIGHT
+    elseif type == M.PDF_ANNOT_STRIKEOUT then
+        color[0] = 1.0
+        color[1] = 0.0
+        color[2] = 0.0
+        line_thickness = mupdf.LINE_THICKNESS
+        line_height = mupdf.STRIKE_HEIGHT
     else
         return
     end
 
-    local annot = W.mupdf_pdf_create_annot(self.ctx, ffi.cast("pdf_page*", self.page), type)
-    if annot == nil then merror(self.ctx, "could not create annotation") end
+    local doc = M.pdf_specifics(context(), self.doc.doc)
+    if doc == nil then merror("could not get pdf_specifics") end
 
-    local ok = W.mupdf_pdf_set_annot_quad_points(self.ctx, annot, n, points)
-    if not ok then merror(self.ctx, "could not set annotation quadpoints") end
+    local annot = W.mupdf_pdf_create_annot(context(), ffi.cast("pdf_page*", self.page), type)
+    if annot == nil then merror("could not create annotation") end
 
-    ok = W.mupdf_pdf_set_annot_color(self.ctx, annot, 3, color)
-    if not ok then merror(self.ctx, "could not set annotation color") end
+    local ok = W.mupdf_pdf_set_annot_quad_points(context(), annot, n, points)
+    if ok == nil then merror("could not set markup annot quadpoints") end
 
-    ok = W.mupdf_pdf_set_annot_opacity(self.ctx, annot, alpha)
-    if not ok then merror(self.ctx, "could not set annotation opacity") end
-
-    -- Synthesize /Rect and /AP appearance stream, needed for visibility in desktop PDF viewers
-    ok = W.mupdf_pdf_update_annot(self.ctx, annot)
-    if not ok then merror(self.ctx, "could not update markup annotation") end
-
-    -- Fetch back MuPDF's stored coordinates of all quadpoints, as they may have been modified/rounded
-    -- (we need the exact ones that were saved if we want to be able to find them for deletion/update)
-    for i = 0, n-1 do
-        W.mupdf_pdf_annot_quad_point(self.ctx, annot, i, points+i)
-    end
+    ok = W.mupdf_pdf_set_markup_appearance(context(), doc, annot, color, alpha, line_thickness, line_height)
+    if ok == nil then merror("could not set markup appearance") end
 end
 
--- Add an ink annotation (/Subtype /Ink) built from one or more freehand strokes.
---   strokes : array of strokes; each stroke is an array of { x=, y= } points in
---             native page coordinates (same convention as quad points above).
---   bb_color: { r, g, b } components 0-255.
---   width   : ink border (line) width in points.
---   opacity : 0..1.
-function page_mt.__index:addInkAnnotation(strokes, bb_color, width, opacity)
-    local n = #strokes
-    if n == 0 then return end
-
-    -- counts[i] = number of points in stroke i; vertices = flattened fz_point[].
-    local counts = ffi.new("int[?]", n)
-    local total = 0
-    for i = 1, n do
-        counts[i-1] = #strokes[i]
-        total = total + #strokes[i]
-    end
-    if total == 0 then return end
-
-    local vertices = ffi.new("fz_point[?]", total)
-    local k = 0
-    for i = 1, n do
-        for j = 1, #strokes[i] do
-            vertices[k].x = strokes[i][j].x
-            vertices[k].y = strokes[i][j].y
-            k = k + 1
-        end
-    end
-
-    local annot = W.mupdf_pdf_create_annot(self.ctx, ffi.cast("pdf_page*", self.page), M.PDF_ANNOT_INK)
-    if annot == nil then merror(self.ctx, "could not create ink annotation") end
-
-    local ok = W.mupdf_pdf_set_annot_ink_list(self.ctx, annot, n, counts, vertices)
-    if not ok then merror(self.ctx, "could not set ink list") end
-
-    local color = ffi.new("float[3]")
-    color[0] = bb_color.r / 255
-    color[1] = bb_color.g / 255
-    color[2] = bb_color.b / 255
-    ok = W.mupdf_pdf_set_annot_color(self.ctx, annot, 3, color)
-    if not ok then merror(self.ctx, "could not set ink annotation color") end
-
-    ok = W.mupdf_pdf_set_annot_border_width(self.ctx, annot, width or 1.0)
-    if not ok then merror(self.ctx, "could not set ink annotation border width") end
-
-    ok = W.mupdf_pdf_set_annot_opacity(self.ctx, annot, opacity or 1.0)
-    if not ok then merror(self.ctx, "could not set ink annotation opacity") end
-
-    -- Synthesize the /Rect and /AP appearance stream, without which the
-    -- annotation is invisible in desktop PDF viewers (Preview, Acrobat, ...).
-    ok = W.mupdf_pdf_update_annot(self.ctx, annot)
-    if not ok then merror(self.ctx, "could not update ink annotation") end
-end
-
-function page_mt.__index:deleteAnnotation(annot)
-    local ok = W.mupdf_pdf_delete_annot(self.ctx, ffi.cast("pdf_page*", self.page), annot)
-    if not ok then merror(self.ctx, "could not delete annotation") end
-end
-
-function page_mt.__index:getMarkupAnnotation(points, n)
-    local annot = W.mupdf_pdf_first_annot(self.ctx, ffi.cast("pdf_page*", self.page))
-    while annot ~= nil do
-        local n2 = W.mupdf_pdf_annot_quad_point_count(self.ctx, annot)
-        if n == n2 then
-            local quadpoint = ffi.new("fz_quad[1]")
-            local match = true
-            for i = 0, n-1 do
-                W.mupdf_pdf_annot_quad_point(self.ctx, annot, i, quadpoint)
-                if (points[i].ul.x ~= quadpoint[0].ul.x or
-                    points[i].ul.y ~= quadpoint[0].ul.y or
-                    points[i].ur.x ~= quadpoint[0].ur.x or
-                    points[i].ur.y ~= quadpoint[0].ur.y or
-                    points[i].ll.x ~= quadpoint[0].ll.x or
-                    points[i].ll.y ~= quadpoint[0].ll.y or
-                    points[i].lr.x ~= quadpoint[0].lr.x or
-                    points[i].lr.y ~= quadpoint[0].lr.y) then
-                    match = false
-                    break
-                end
-            end
-            if match then return annot end
-        end
-        annot = W.mupdf_pdf_next_annot(self.ctx, annot)
-    end
-    return nil
-end
-
-function page_mt.__index:updateMarkupAnnotation(annot, contents)
-    local ok = W.mupdf_pdf_set_annot_contents(self.ctx, annot, contents)
-    if not ok then merror(self.ctx, "could not update markup annot contents") end
-end
-
-function page_mt.__index:getEmbeddedAnnotations()
-    local annotations = {}
-    local annot = W.mupdf_pdf_first_annot(self.ctx, ffi.cast("pdf_page*", self.page))
-    while annot ~= nil do
-        local annot_type = W.mupdf_pdf_annot_type(self.ctx, annot)
-        -- markup annotations: highlight=8, underline=9, squiggly=10, strikeout=11
-        if annot_type >= 8 and annot_type <= 11 then
-            local annot_boxes = {}
-            local quadpoint = ffi.new("fz_quad[1]")
-            local point_count = W.mupdf_pdf_annot_quad_point_count(self.ctx, annot)
-            for i = 0, point_count - 1 do
-                W.mupdf_pdf_annot_quad_point(self.ctx, annot, i, quadpoint)
-                table.insert(annot_boxes, {
-                    h = quadpoint[0].ll.y - quadpoint[0].ul.y + 1,
-                    w = quadpoint[0].ur.x - quadpoint[0].ul.x + 1,
-                    x = quadpoint[0].ul.x,
-                    y = quadpoint[0].ul.y,
-                })
-            end
-            local contents = W.mupdf_pdf_annot_contents(self.ctx, annot)
-            table.insert(annotations, {
-                boxes = annot_boxes,
-                type = annot_type,
-                contents = contents ~= nil and ffi.string(contents) or nil,
-            })
-        end
-        annot = W.mupdf_pdf_next_annot(self.ctx, annot)
-    end
-    return next(annotations) and annotations
-end
 
 -- image loading via MuPDF:
 
@@ -946,41 +649,38 @@ end
 Renders image data.
 --]]
 function mupdf.renderImage(data, size, width, height)
-    local ctx = context()
-    local buffer = W.mupdf_new_buffer_from_shared_data(ctx,
+    local buffer = W.mupdf_new_buffer_from_shared_data(context(),
                      ffi.cast("unsigned char*", data), size)
-    local image = W.mupdf_new_image_from_buffer(ctx, buffer)
-    M.fz_drop_buffer(ctx, buffer)
-    if image == nil then merror(ctx, "could not load image data") end
-    local pixmap = W.mupdf_get_pixmap_from_image(ctx,
+    local image = W.mupdf_new_image_from_buffer(context(), buffer)
+    W.mupdf_drop_buffer(context(), buffer)
+    if image == nil then merror("could not load image data") end
+    local pixmap = W.mupdf_get_pixmap_from_image(context(),
                     image, nil, nil, nil, nil)
-    M.fz_drop_image(ctx, image)
+    M.fz_drop_image(context(), image)
     if pixmap == nil then
-        merror(ctx, "could not create pixmap from image")
+        merror("could not create pixmap from image")
     end
 
-    local p_width = M.fz_pixmap_width(ctx, pixmap)
-    local p_height = M.fz_pixmap_height(ctx, pixmap)
+    local p_width = M.fz_pixmap_width(context(), pixmap)
+    local p_height = M.fz_pixmap_height(context(), pixmap)
     -- mupdf_get_pixmap_from_image() may not scale image to the
     -- width and height provided, so check and scale it if needed
     if width and height then
-        -- Ensure we pass integer values for width & height to fz_scale_pixmap(),
-        -- because it enforces an alpha channel otherwise...
+        -- MuPDF 1.12 fz_scale_pixmap() may behave strangely (on ARM only!)
+        -- if it is given non-integer width and height, and returns a corrupted
+        -- image with a different ncomp than original pixmap...)
         width = math.floor(width)
         height = math.floor(height)
         if p_width ~= width or p_height ~= height then
-            local scaled_pixmap = M.fz_scale_pixmap(ctx, pixmap, 0, 0, width, height, nil)
-            M.fz_drop_pixmap(ctx, pixmap)
-            if scaled_pixmap == nil then
-                merror(ctx, "could not create scaled pixmap from pixmap")
-            end
+            local scaled_pixmap = M.fz_scale_pixmap(context(), pixmap, 0, 0, width, height, nil)
+            M.fz_drop_pixmap(context(), pixmap)
             pixmap = scaled_pixmap
-            p_width = M.fz_pixmap_width(ctx, pixmap)
-            p_height = M.fz_pixmap_height(ctx, pixmap)
+            p_width = M.fz_pixmap_width(context(), pixmap)
+            p_height = M.fz_pixmap_height(context(), pixmap)
         end
     end
     local bbtype
-    local ncomp = M.fz_pixmap_components(ctx, pixmap)
+    local ncomp = M.fz_pixmap_components(context(), pixmap)
     if ncomp == 1 then bbtype = BlitBuffer.TYPE_BB8
     elseif ncomp == 2 then bbtype = BlitBuffer.TYPE_BB8A
     elseif ncomp == 3 then bbtype = BlitBuffer.TYPE_BBRGB24
@@ -990,16 +690,17 @@ function mupdf.renderImage(data, size, width, height)
     -- Handle RGB->BGR conversion for Kobos when needed
     local bb
     if mupdf.bgr and ncomp >= 3 then
-        local bgr_pixmap = W.mupdf_convert_pixmap(ctx, pixmap, M.fz_device_bgr(ctx), nil, nil, M.fz_default_color_params, (ncomp == 4 and 1 or 0))
-        M.fz_drop_pixmap(ctx, pixmap)
-        if bgr_pixmap == nil then
-            merror(ctx, "could not convert pixmap to BGR")
-        end
-        pixmap = bgr_pixmap
+        local bgr_pixmap = M.fz_convert_pixmap(context(), pixmap, M.fz_device_bgr(context()), nil, nil, M.fz_default_color_params(context()), (ncomp == 4 and 1 or 0))
+        M.fz_drop_pixmap(context(), pixmap)
+
+        local p = M.fz_pixmap_samples(context(), bgr_pixmap)
+        bb = BlitBuffer.new(p_width, p_height, bbtype, p):copy()
+        M.fz_drop_pixmap(context(), bgr_pixmap)
+    else
+        local p = M.fz_pixmap_samples(context(), pixmap)
+        bb = BlitBuffer.new(p_width, p_height, bbtype, p):copy()
+        M.fz_drop_pixmap(context(), pixmap)
     end
-    local p = M.fz_pixmap_samples(ctx, pixmap)
-    bb = BlitBuffer.new(p_width, p_height, bbtype, p):copy()
-    M.fz_drop_pixmap(ctx, pixmap)
     return bb
 end
 
@@ -1015,98 +716,71 @@ end
 --[[--
 Scales a blitbuffer.
 
-MµPDF's scaling is of much better quality than the very naive implementation in blitbuffer.lua.
+Quality of scaling done by MuPDF is better than the one done in blitbuffer.lua
 (see fz_scale_pixmap_cached() in mupdf/source/fitz/draw-scale-simple.c).
 Same arguments as BlitBuffer:scale() for easy replacement.
-
-Unlike BlitBuffer:scale(), this *ignores* the blitbuffer's rotation
-(i.e., where possible, we simply wrap the BlitBuffer's data in a fitz pixmap,
-with no data copy, so the buffer's *native* memory layout is followed).
-If you actually want to preserve the rotation, you'll have to fudge
-with the width & height arguments and tweak the returned buffer's rotation flag,
-or go through a temporary copy to ensure that the buffer's memory is laid out accordingly.
 --]]
 function mupdf.scaleBlitBuffer(bb, width, height)
     -- We need first to convert our BlitBuffer to a pixmap
+    local orig_w, orig_h = bb:getWidth(), bb:getHeight()
     local bbtype = bb:getType()
+    -- bb types TYPE_BB8A and TYPE_BBRGB32 work as-is with MuPDF
+    -- but the other types' bb.data give corrupted resulting pixmap.
     local colorspace
     local converted_bb
-    local alpha
-    local stride = bb.stride
-    local ctx = context()
-    -- MuPDF should know how to handle *most* of our BB types,
-    -- special snowflakes excluded (4bpp & RGB565),
-    -- in which case we feed it a temporary copy in the closest format it'll understand.
-    if bbtype == BlitBuffer.TYPE_BB8 then
-        colorspace = M.fz_device_gray(ctx)
-        alpha = 0
-    elseif bbtype == BlitBuffer.TYPE_BB8A then
-        colorspace = M.fz_device_gray(ctx)
-        alpha = 1
-    elseif bbtype == BlitBuffer.TYPE_BBRGB24 then
-        if mupdf.bgr then
-            colorspace = M.fz_device_bgr(ctx)
-        else
-            colorspace = M.fz_device_rgb(ctx)
-        end
-        alpha = 0
+    local stride
+    if bbtype == BlitBuffer.TYPE_BB8A then
+        colorspace = M.fz_device_gray(context())
+        stride = orig_w * 2
     elseif bbtype == BlitBuffer.TYPE_BBRGB32 then
         if mupdf.bgr then
-            colorspace = M.fz_device_bgr(ctx)
+            colorspace = M.fz_device_bgr(context())
         else
-            colorspace = M.fz_device_rgb(ctx)
+            colorspace = M.fz_device_rgb(context())
         end
-        alpha = 1
-    elseif bbtype == BlitBuffer.TYPE_BB4 then
-        converted_bb = BlitBuffer.new(bb.w, bb.h, BlitBuffer.TYPE_BB8)
-        converted_bb:blitFrom(bb, 0, 0, 0, 0, bb.w, bb.h)
-        bb = converted_bb -- we don't free() the provided bb, but we'll have to free our converted_bb
-        colorspace = M.fz_device_gray(ctx)
-        alpha = 0
-        stride = bb.w
+        stride = orig_w * 4
     else
-        converted_bb = BlitBuffer.new(bb.w, bb.h, BlitBuffer.TYPE_BBRGB32)
-        converted_bb:blitFrom(bb, 0, 0, 0, 0, bb.w, bb.h)
+        -- We need to convert the other types to one of the working
+        -- types, and TYPE_BBRGB32 is the only one that works with
+        -- the following operation (greyscale TYPE_B48 and TYPE_BB8
+        -- get corrupted if we blit them to a TYPE_BB8A, but are fine
+        -- when blited to a TYPE_BBRGB32)
+        converted_bb = BlitBuffer.new(orig_w, orig_h, BlitBuffer.TYPE_BBRGB32)
+        converted_bb:blitFrom(bb, 0, 0, 0, 0, orig_w, orig_h)
         bb = converted_bb -- we don't free() the provided bb, but we'll have to free our converted_bb
         if mupdf.bgr then
-            colorspace = M.fz_device_bgr(ctx)
+            colorspace = M.fz_device_bgr(context())
         else
-            colorspace = M.fz_device_rgb(ctx)
+            colorspace = M.fz_device_rgb(context())
         end
-        alpha = 1
+        stride = orig_w * 4
     end
     -- We can now create a pixmap from this bb of correct type
-    local pixmap = W.mupdf_new_pixmap_with_data(ctx, colorspace,
-                    bb.w, bb.h, nil, alpha, stride, ffi.cast("unsigned char*", bb.data))
+    -- whose bb.data is valid for mupdf
+    local pixmap = W.mupdf_new_pixmap_with_data(context(), colorspace,
+                    orig_w, orig_h, nil, 1, stride, ffi.cast("unsigned char*", bb.data))
     if pixmap == nil then
         if converted_bb then converted_bb:free() end -- free our home made bb
-        merror(ctx, "could not create pixmap from blitbuffer")
+        merror("could not create pixmap from blitbuffer")
     end
     -- We can now scale the pixmap
-    -- Better to ensure we give integer width and height, to avoid a black 1-pixel line at right and bottom of image.
-    -- Also, fz_scale_pixmap enforces an alpha channel if w or h are floats...
-    local scaled_pixmap = M.fz_scale_pixmap(ctx, pixmap, 0, 0, math.floor(width), math.floor(height), nil)
-    M.fz_drop_pixmap(ctx, pixmap) -- free our original pixmap
-    if scaled_pixmap == nil then
-        if converted_bb then converted_bb:free() end -- free our home made bb
-        merror(ctx, "could not create scaled pixmap from pixmap")
-    end
-    local p_width = M.fz_pixmap_width(ctx, scaled_pixmap)
-    local p_height = M.fz_pixmap_height(ctx, scaled_pixmap)
+    -- Better to ensure we give integer width and height, to avoid a black 1-pixel line at right and bottom of image
+    local scaled_pixmap = M.fz_scale_pixmap(context(), pixmap, 0, 0, math.floor(width), math.floor(height), nil)
+    M.fz_drop_pixmap(context(), pixmap) -- free our original pixmap
+    local p_width = M.fz_pixmap_width(context(), scaled_pixmap)
+    local p_height = M.fz_pixmap_height(context(), scaled_pixmap)
     -- And convert the pixmap back to a BlitBuffer
     bbtype = nil
-    local ncomp = M.fz_pixmap_components(ctx, scaled_pixmap)
-    if ncomp == 1 then bbtype = BlitBuffer.TYPE_BB8
-    elseif ncomp == 2 then bbtype = BlitBuffer.TYPE_BB8A
-    elseif ncomp == 3 then bbtype = BlitBuffer.TYPE_BBRGB24
+    local ncomp = M.fz_pixmap_components(context(), scaled_pixmap)
+    if ncomp == 2 then bbtype = BlitBuffer.TYPE_BB8A
     elseif ncomp == 4 then bbtype = BlitBuffer.TYPE_BBRGB32
     else
         if converted_bb then converted_bb:free() end -- free our home made bb
         error("unsupported number of color components")
     end
-    local p = M.fz_pixmap_samples(ctx, scaled_pixmap)
+    local p = M.fz_pixmap_samples(context(), scaled_pixmap)
     bb = BlitBuffer.new(p_width, p_height, bbtype, p):copy()
-    M.fz_drop_pixmap(ctx, scaled_pixmap) -- free our scaled pixmap
+    M.fz_drop_pixmap(context(), scaled_pixmap) -- free our scaled pixmap
     if converted_bb then converted_bb:free() end -- free our home made bb
     return bb
 end
@@ -1123,6 +797,32 @@ local function get_k2pdfopt()
     return cached_k2pdfopt
 end
 
+-- lazily load libpthread
+local cached_pthread
+local function get_pthread()
+    if cached_pthread then return cached_pthread end
+
+    local util = require("ffi/util")
+
+    require("ffi/pthread_h")
+
+    local ok
+    if ffi.os == "Windows" then
+        return ffi.load("libwinpthread-1.dll")
+    elseif util.isAndroid() then
+        -- pthread directives are in Bionic library on Android
+        ok, cached_pthread = pcall(ffi.load, "libc.so")
+        if ok then return cached_pthread end
+    else
+        -- Kobo devices strangely have no libpthread.so in LD_LIBRARY_PATH
+        -- so we hardcode the libpthread.so.0 here just for Kobo.
+        for _, libname in ipairs({"pthread", "libpthread.so.0"}) do
+            ok, cached_pthread = pcall(ffi.load, libname)
+            if ok then return cached_pthread end
+        end
+    end
+end
+
 --[[
 the following function is a reimplementation of what can be found
 in libk2pdfopt/willuslib/bmpmupdf.c
@@ -1132,12 +832,11 @@ what we get from mupdf.
 --]]
 local function bmpmupdf_pixmap_to_bmp(bmp, pixmap)
     local k2pdfopt = get_k2pdfopt()
-    local ctx = context()
 
-    bmp.width = M.fz_pixmap_width(ctx, pixmap)
-    bmp.height = M.fz_pixmap_height(ctx, pixmap)
-    local ncomp = M.fz_pixmap_components(ctx, pixmap)
-    local p = M.fz_pixmap_samples(ctx, pixmap)
+    bmp.width = M.fz_pixmap_width(context(), pixmap)
+    bmp.height = M.fz_pixmap_height(context(), pixmap)
+    local ncomp = M.fz_pixmap_components(context(), pixmap)
+    local p = M.fz_pixmap_samples(context(), pixmap)
     if ncomp == 2 or ncomp == 4 then
         k2pdfopt.pixmap_to_bmp(bmp, p, ncomp)
     else
@@ -1145,45 +844,88 @@ local function bmpmupdf_pixmap_to_bmp(bmp, pixmap)
     end
 end
 
-local function render_for_kopt(bmp, page, scale, bounds, background_cleanup)
+local function render_for_kopt(bmp, page, scale, bounds)
     local k2pdfopt = get_k2pdfopt()
 
-    local bbox = ffi.new("fz_irect")
+    local bbox = ffi.new("fz_irect[1]")
     local ctm = ffi.new("fz_matrix")
-    W.mupdf_fz_scale(ctm, scale, scale)
-    W.mupdf_fz_transform_rect(bounds, ctm)
-    W.mupdf_fz_round_rect(bbox, bounds)
+    M.fz_scale(ctm, scale, scale)
+    M.fz_transform_rect(bounds, ctm)
+    M.fz_round_rect(bbox, bounds)
 
-    local colorspace = page.doc.color and M.fz_device_rgb(page.ctx)
-        or M.fz_device_gray(page.ctx)
-    if mupdf.bgr and page.doc.color then
-        colorspace = M.fz_device_bgr(page.ctx)
+    local colorspace = mupdf.color and M.fz_device_rgb(context())
+        or M.fz_device_gray(context())
+    if mupdf.bgr and mupdf.color then
+        colorspace = M.fz_device_bgr(context())
     end
-    local pix = W.mupdf_new_pixmap_with_bbox(page.ctx, colorspace, bbox, nil, 1)
-    if pix == nil then merror(page.ctx, "could not allocate pixmap") end
+    local pix = W.mupdf_new_pixmap_with_bbox(context(), colorspace, bbox, nil, 1)
+    if pix == nil then merror("could not allocate pixmap") end
 
-    run_page(page, pix, ctm, background_cleanup)
+    run_page(page, pix, ctm)
 
     k2pdfopt.bmp_init(bmp)
 
     bmpmupdf_pixmap_to_bmp(bmp, pix)
 
-    M.fz_drop_pixmap(page.ctx, pix)
+    M.fz_drop_pixmap(context(), pix)
 end
 
-function page_mt.__index:getPagePix(kopt_context, render_mode, background_cleanup)
-    local bounds = ffi.new("fz_rect", kopt_context.bbox.x0, kopt_context.bbox.y0, kopt_context.bbox.x1, kopt_context.bbox.y1)
+function page_mt.__index:reflow(kopt_context)
+    local k2pdfopt = get_k2pdfopt()
 
-    render_for_kopt(kopt_context.src, self, kopt_context.zoom, bounds, background_cleanup ~= nil and background_cleanup ~= 0)
+    local bounds = ffi.new("fz_rect[1]")
+    bounds[0].x0 = kopt_context.bbox.x0
+    bounds[0].y0 = kopt_context.bbox.y0
+    bounds[0].x1 = kopt_context.bbox.x1
+    bounds[0].y1 = kopt_context.bbox.y1
+    -- probe scale
+    local zoom = kopt_context.zoom * kopt_context.quality
+    M.fz_transform_rect(bounds, M.fz_identity)
+    local scale = (1.5 * zoom * kopt_context.dev_width) / bounds[0].x1
+    -- store zoom
+    kopt_context.zoom = scale
+    -- do real scale
+    mupdf.debug(string.format("reading page:%d,%d,%d,%d scale:%.2f",bounds[0].x0,bounds[0].y0,bounds[0].x1,bounds[0].y1,scale))
+    render_for_kopt(kopt_context.src, self, scale, bounds)
+
+    if kopt_context.precache ~= 0 then
+        local pthread = get_pthread()
+        local rf_thread = ffi.new("pthread_t[1]")
+        local attr = ffi.new("pthread_attr_t[1]")
+        pthread.pthread_attr_init(attr)
+        pthread.pthread_attr_setdetachstate(attr, pthread.PTHREAD_CREATE_DETACHED)
+        pthread.pthread_create(rf_thread, attr, k2pdfopt.k2pdfopt_reflow_bmp, ffi.cast("void*", kopt_context))
+        pthread.pthread_attr_destroy(attr)
+    else
+        k2pdfopt.k2pdfopt_reflow_bmp(kopt_context)
+    end
+end
+
+function page_mt.__index:getPagePix(kopt_context)
+    local bounds = ffi.new("fz_rect[1]")
+    bounds[0].x0 = kopt_context.bbox.x0
+    bounds[0].y0 = kopt_context.bbox.y0
+    bounds[0].x1 = kopt_context.bbox.x1
+    bounds[0].y1 = kopt_context.bbox.y1
+
+    render_for_kopt(kopt_context.src, self, kopt_context.zoom, bounds)
 
     kopt_context.page_width = kopt_context.src.width
     kopt_context.page_height = kopt_context.src.height
 end
 
-function page_mt.__index:toBmp(bmp, dpi)
-    local bounds = ffi.new("fz_rect")
-    W.mupdf_fz_bound_page(self.ctx, self.page, bounds)
-    render_for_kopt(bmp, self, dpi/72, bounds, false)
+function page_mt.__index:toBmp(bmp, dpi, color)
+    local color_save = mupdf.color
+    mupdf.color = color and true or false
+
+    local bounds = ffi.new("fz_rect[1]")
+    M.fz_bound_page(context(), self.page, bounds)
+
+    render_for_kopt(bmp, self, dpi/72, bounds)
+
+    mupdf.color = color_save
 end
+
+setmetatable(mupdf, mupdf_mt)
 
 return mupdf

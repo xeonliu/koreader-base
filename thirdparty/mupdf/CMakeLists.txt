@@ -1,140 +1,87 @@
-list(APPEND PATCH_FILES
-    # Use external fonts.
-    external_fonts.patch
-    # Add support for encrypted zips.
-    encrypted_zip.patch
-    # Disable potentially crashy ARM ASM (it's 7 years old, and hell to debug).
-    # NOTE: There's also a few ARCH_UNALIGNED_OK checks, but we never did pass that define.
-    #       (FWIW, we *could*, on anything not kindle-legacy).
-    no_arm_asm.patch
-    # Honor CFLAGS.
-    honor_cflags.patch
-    # Support for WebP images (unmerged-yet proposed upstream patch cleaned up of win32 stuff).
-    webp-upstream-697749.patch
-    # Add support for CBZ chapters.
-    mupdf_cbz_chapter_support.patch
-    # Ensure an HTML document fonts are freed on close.
-    free-html-doc-fonts-on-close.patch
-    # Relink on change(s) to external libraries.
-    relink_on_xlibs_change.patch
-    # Fix symbols visiblity.
-    visibility.patch
-    # Fix build when getentropy is not available (glibc < 2.25).
-    fix_build_without_getentropy.patch
-)
+PROJECT(mupdf)
+cmake_minimum_required(VERSION 2.8.3)
 
-# Remove unnecessary vendored thirdparty libraries.
-list(APPEND PATCH_CMD COMMAND rm -rf
-    thirdparty/brotli
-    thirdparty/curl
-    thirdparty/freeglut
-    thirdparty/freetype
-    thirdparty/harfbuzz
-    thirdparty/leptonica
-    thirdparty/libjpeg
-    # NOTE: We need to keep the mujs source around even though support is
-    # disabled because `regexp.c` is directly included by `fitz/regexp.c`.
-    # thirdparty/mujs
-    thirdparty/tesseract
-    thirdparty/zint
-    thirdparty/zlib
-    thirdparty/zxing-cpp
-)
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
+include("koreader_thirdparty_git")
 
-string(TOLOWER ${CMAKE_BUILD_TYPE} MUPDF_BUILD_TYPE)
+enable_language(C)
 
-if(WIN32)
-    set(OS)
+assert_var_defined(HOSTCFLAGS)
+assert_var_defined(HOSTCC)
+assert_var_defined(OS)
+set(BUILD_CMD_GENERATE sh -c "env CFLAGS=\"${HOSTCFLAGS}\" $(MAKE) -j${PARALLEL_JOBS} generate build=\"release\" CC=\"${HOSTCC}\" verbose=1")
+
+assert_var_defined(LDFLAGS)
+assert_var_defined(XCFLAGS)
+# disable a couple of things to save a small bit of space
+# CMYK plotter only 100 kB
+# javascript (for form data validation) close to 800 kB
+set(XCFLAGS "${XCFLAGS} -DFZ_PLOTTERS_CMYK=0 -DFZ_ENABLE_JS=0")
+set(STATIC_BUILD_CMD "$(MAKE) -j${PARALLEL_JOBS}")
+set(STATIC_BUILD_CMD "${STATIC_BUILD_CMD} LDFLAGS=\"${LDFLAGS}\" XCFLAGS=\"${XCFLAGS}\"")
+set(STATIC_BUILD_CMD "${STATIC_BUILD_CMD} CC=\"${CC}\" CXX=\"${CXX}\" AR=\"${AR}\" build=\"release\" MUDRAW= MUTOOL= CURL_LIB= OS=${OS}")
+set(STATIC_BUILD_CMD "${STATIC_BUILD_CMD} verbose=1 FREETYPE_DIR=nonexisting JPEG_DIR=nonexisting ZLIB_DIR=nonexisting CROSSCOMPILE=yes")
+set(STATIC_BUILD_CMD sh -c "${STATIC_BUILD_CMD} third libs")
+
+# by default, mupdf compiles to a static library:
+# we generate a dynamic library from the static library:
+assert_var_defined(CFLAGS)
+assert_var_defined(MUPDF_LIB_STATIC)
+assert_var_defined(MUPDF_THIRDPARTY_LIBS)
+assert_var_defined(MUPDF_SONAME)
+assert_var_defined(ZLIB)
+assert_var_defined(AES_LIB)
+assert_var_defined(JPEG_LIB)
+assert_var_defined(FREETYPE_LIB)
+assert_var_defined(MUPDF_LIB)
+assert_var_defined(RPATH)
+if($ENV{DARWIN})
+    set(LINK_OPTS "-Wl,-rpath,'${RPATH}'")
+    set(LINK_OPTS "${LINK_OPTS} -Wl,-all_load ${MUPDF_LIB_STATIC}")
+    set(LINK_OPTS "${LINK_OPTS} -Wl,-all_load ${MUPDF_THIRDPARTY_LIBS}")
+    set(LINK_OPTS "${LINK_OPTS} -dynamiclib -undefined dynamic_lookup")
 else()
-    set(OS Other)
+    set(LINK_OPTS "-Wl,-E -Wl,-rpath,'${RPATH}'")
+    set(LINK_OPTS "${LINK_OPTS} -Wl,--whole-archive ${MUPDF_LIB_STATIC}")
+    set(LINK_OPTS "${LINK_OPTS} -Wl,--no-whole-archive ${MUPDF_THIRDPARTY_LIBS}")
+    set(LINK_OPTS "${LINK_OPTS} -Wl,-soname=${MUPDF_SONAME}")
+    set(LINK_OPTS "${LINK_OPTS} build/release/libmupdfthird.a")
 endif()
+set(SHARED_BUILD_STR "${CC} -shared ${CFLAGS} ${LINK_OPTS} ${AES_LIB} ${ZLIB} ${JPEG_LIB} ${FREETYPE_LIB} -o ${MUPDF_LIB} -lm")
 
-set(LIB_SPEC mupdf)
-set_libname(LIB ${LIB_SPEC})
+# explictly use envs defined in Makefile.defs
+if($ENV{ANDROID})
+    set(SHARED_BUILD_STR "${SHARED_BUILD_STR} -llog")
+endif($ENV{ANDROID})
 
-string(APPEND XCFLAGS
-    " ${CFLAGS} -fvisibility=hidden"
-    # Disable a couple of things to save a small bit of space:
-    # - builtin fonts
-    # - CMYK plotter only 100 kB
-    # - hyphenation (~700 kB)
-    # - formats already supported by crengine: Markdown
-    # - miscellaneous output formats: DOCX, OCR, ODT
-    " -DNOBUILTINFONT"
-    " -DFZ_ENABLE_DOCX_OUTPUT=0"
-    " -DFZ_ENABLE_HYPHEN=0"
-    " -DFZ_ENABLE_MD=0"
-    " -DFZ_ENABLE_OCR_OUTPUT=0"
-    " -DFZ_ENABLE_ODT_OUTPUT=0"
-    " -DFZ_PLOTTERS_CMYK=0"
-    " -DHAVE_LIBAES=1"
-    " -DHAVE_LIBARCHIVE=1"
-    " -DHAVE_WEBP=1"
-)
-if(ANDROID AND CHOST MATCHES "^armv7a-.*")
-    # NOTE: to be removed when upgrading the minimal supported API level to 24.
-    # (https://android.googlesource.com/platform/bionic/+/master/docs/32-bit-abi.md)
-    string(APPEND XCFLAGS " -D_FILE_OFFSET_BITS=32")
-endif()
+set(SHARED_BUILD_CMD sh -c "${SHARED_BUILD_STR}")
+# use external fonts
+set(PATCH_CMD1 sh -c "patch -N -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/external_fonts.patch || true")
+# add support for encryted zips
+set(PATCH_CMD2 sh -c "patch -N -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/encrypted_zip.patch || true")
+# use libjpeg as a shared library
+set(PATCH_CMD3 sh -c "patch -N -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/libjpeg_shared.patch || true")
 
-set(MAKE_CMD
-    make -C ${SOURCE_DIR}
-    # Compilation flags.
-    AR=${AR}
-    CC=${CC}
-    CXX=${CXX}
-    LDFLAGS=
-    XCFLAGS=${XCFLAGS}
-    USE_ARGUMENT_FILE=no
-    # Disable some features.
-    barcode=no
-    brotli=no
-    mujs=no
-    tesseract=no
-    USE_CMARK_GFM=no
-    # Disable some vendored libraries:
-    # - curl
-    USE_SYSTEM_CURL=yes
-    HAVE_SYS_CURL=no
-    # - freetype
-    USE_SYSTEM_FREETYPE=yes
-    SYS_FREETYPE_CFLAGS=-I${STAGING_DIR}/include/freetype2
-    SYS_FREETYPE_LIBS=
-    # - harfbuzzz
-    USE_SYSTEM_HARFBUZZ=yes
-    SYS_HARFBUZZ_CFLAGS=-I${STAGING_DIR}/include/harfbuzz
-    SYS_HARFBUZZ_LIBS=
-    # - libarchive
-    USE_SYSTEM_LIBARCHIVE=yes
-    SYS_LIBARCHIVE_CFLAGS=-I${STAGING_DIR}/include
-    SYS_LIBARCHIVE_LIBS=
-    # - libjpeg
-    USE_SYSTEM_LIBJPEG=yes
-    SYS_LIBJPEG_LIBS=
-    # - zlib
-    USE_SYSTEM_ZLIB=yes
-    SYS_ZLIB_CFLAGS=-I${STAGING_DIR}/include
-    SYS_ZLIB_LIBS=
-    ZLIB_CFLAGS=-I${STAGING_DIR}/include
-    # Build out of tree.
-    OUT=${BINARY_DIR}
-    # Other.
-    OS=${OS}
-    build=${MUPDF_BUILD_TYPE}
-    shared=no
-    verbose=no
+# TODO: ignore shared git submodules built outside of mupdf by ourselves
+# https://git.ghostscript.com/mupdf.git is slow, so we use the official mirror on GitHub
+ep_get_source_dir(SOURCE_DIR)
+ko_write_gitclone_script(
+    GIT_CLONE_SCRIPT_FILENAME
+    https://github.com/ArtifexSoftware/mupdf.git
+    tags/1.13.0
+    ${SOURCE_DIR}
 )
 
-list(APPEND BUILD_CMD COMMAND ${MAKE_CMD} libs)
-
-list(APPEND INSTALL_CMD COMMAND ${MAKE_CMD} DESTDIR=${STAGING_DIR} prefix=/ install-libs)
-
-external_project(
-    DOWNLOAD URL 93158ed50048483ab007c8c68c67e309
-    https://github.com/ArtifexSoftware/mupdf-downloads/releases/download/1.28.6/mupdf-1.28.6-source.tar.lz
-    https://mupdf.com/downloads/archive/mupdf-1.28.6-source.tar.lz
-    PATCH_FILES ${PATCH_FILES}
-    PATCH_COMMAND ${PATCH_CMD}
-    BUILD_COMMAND ${BUILD_CMD}
-    INSTALL_COMMAND ${INSTALL_CMD}
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -P ${GIT_CLONE_SCRIPT_FILENAME}
+    BUILD_IN_SOURCE 1
+    PATCH_COMMAND COMMAND ${PATCH_CMD1} COMMAND ${PATCH_CMD2} COMMAND ${PATCH_CMD3}
+    # skip configure
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ${BUILD_CMD_GENERATE} COMMAND ${STATIC_BUILD_CMD} COMMAND ${SHARED_BUILD_CMD}
+    # skip install
+    INSTALL_COMMAND ""
 )

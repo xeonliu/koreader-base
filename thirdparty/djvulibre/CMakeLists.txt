@@ -1,29 +1,61 @@
-# Never *ever* call setlocale, for any reason.
-# Most of our target platforms have custom/broken/incomplete locales, don't screw with it.
-# And this runs in our main thread, so this is Very Bad(TM).
-list(APPEND PATCH_FILES no-locale-mangling.patch)
-# Remove references to (build specific) install directory in binary.
-list(APPEND PATCH_FILES no_references_to_install_dir.patch)
+PROJECT(djvulibre)
+cmake_minimum_required(VERSION 2.8.3)
 
-if(ANDROID)
-    list(APPEND PATCH_FILES android.patch)
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
+include("koreader_thirdparty_git")
+
+enable_language(C CXX)
+
+assert_var_defined(CC)
+assert_var_defined(CFLAGS)
+assert_var_defined(CXX)
+assert_var_defined(CXXFLAGS)
+assert_var_defined(LDFLAGS)
+assert_var_defined(LIBS)
+assert_var_defined(CHOST)
+
+ep_get_source_dir(SOURCE_DIR)
+
+# fix build error due to -Werror under Fedora 26 (and potentially other systems)
+set(CFLAGS "${CFLAGS} -Wno-error")
+
+set(CFG_ENV_VAR "CC=\"${CC}\" CXX=\"${CXX}\" CFLAGS=\"${CFLAGS}\" CXXFLAGS=\"${CXXFLAGS}\" LDFLAGS=\"${LDFLAGS}\" LIBS=\"${LIBS}\"")
+set(CFG_OPTS "-q --disable-desktopfiles --disable-static --enable-shared --disable-xmltools --disable-largefile --without-jpeg --without-tiff -host=\"${CHOST}\"")
+set(CFG_CMD sh -c "${CFG_ENV_VAR} ${SOURCE_DIR}/configure ${CFG_OPTS}")
+
+if($ENV{ANDROID})
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|version_type=none|version_type=linux|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|need_lib_prefix=no|need_lib_prefix=yes|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|need_version=no|need_version=yes|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|library_names_spec=.*|library_names_spec=\"\\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$versuffix \\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$major \\\\\$libname\\\\\$shared_ext\"|' libtool")
+    set(CFG_CMD "${CFG_CMD} && ${ISED} 's|soname_spec=.*|soname_spec=\"\\\\\$libname\\\\\$release\\\\\$shared_ext\\\\\$major\"|' libtool")
 endif()
 
-list(APPEND CMAKE_ARGS
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    -DBUILD_SHARED_LIBS=FALSE
+set(PATCH_CMD sh -c "${ISED} \"s|-lstdc++||g\" libtool")
+
+# Technically we don't need tools on any platform but they only cause issues on Android
+if($ENV{ANDROID})
+    set(PATCH_CMD "${PATCH_CMD} && ${ISED} \"s|DIST_SUBDIRS = libdjvu.*|DIST_SUBDIRS = libdjvu|g\" Makefile")
+    set(PATCH_CMD "${PATCH_CMD} && ${ISED} \"s|SUBDIRS = libdjvu tools share \\$(am__append_1) \\$(am__append_2)|SUBDIRS = libdjvu share \\$(am__append_1) \\$(am__append_2)|g\" Makefile")
+    set(PATCH_CMD "${PATCH_CMD} && patch -N -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/android.patch || true")
+endif()
+
+ko_write_gitclone_script(
+    GIT_CLONE_SCRIPT_FILENAME
+    https://gitlab.com/koreader/djvulibre.git
+    35e56567b200832fcf3c76551a22e3ac4070c636
+    ${SOURCE_DIR}
 )
 
-list(APPEND BUILD_CMD COMMAND ninja)
-
-list(APPEND INSTALL_CMD COMMAND ${CMAKE_COMMAND} --install .)
-
-external_project(
-    DOWNLOAD GIT fbb34d0155b7773b0642783321ae293f7c498cc0 # release.3.5.30.1-8-gfbb34d0
-    https://gitlab.com/koreader/djvulibre.git
-    PATCH_OVERLAY overlay
-    PATCH_FILES ${PATCH_FILES}
-    CMAKE_ARGS ${CMAKE_ARGS}
-    BUILD_COMMAND ${BUILD_CMD}
-    INSTALL_COMMAND ${INSTALL_CMD}
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -P ${GIT_CLONE_SCRIPT_FILENAME}
+    PATCH_COMMAND NOCONFIGURE=1 ./autogen.sh
+    BUILD_IN_SOURCE 1
+    CONFIGURE_COMMAND COMMAND ${CFG_CMD} COMMAND ${PATCH_CMD}
+    BUILD_COMMAND $(MAKE) -j${PARALLEL_JOBS} SUBDIRS_FIRST=libdjvu --silent
+    # skip install
+    INSTALL_COMMAND ""
 )

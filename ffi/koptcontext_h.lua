@@ -1,24 +1,16 @@
--- Automatically generated with ffi-cdecl.
+local ffi = require("ffi")
+require("ffi/leptonica_h")
 
-require("ffi").cdef[[
+ffi.cdef[[
 typedef struct {
-  float x0, y0;
-  float x1, y1;
+  float x0;
+  float y0;
+  float x1;
+  float y1;
 } BBox;
-typedef struct Boxa BOXA;
 typedef struct {
-  int row;
-  int col;
-  int type;
-} K2PAGEBREAKMARK;
-typedef struct {
-  int n;
-  K2PAGEBREAKMARK k2pagebreakmark[32];
-} K2PAGEBREAKMARKS;
-typedef struct Numa NUMA;
-typedef struct Pix PIX;
-typedef struct {
-  double x, y;
+  double x;
+  double y;
 } POINT2D;
 typedef struct {
   int srcpageno;
@@ -31,12 +23,13 @@ typedef struct {
 } WRECTMAP;
 typedef struct {
   WRECTMAP *wrectmap;
-  int n, na;
+  int n;
+  int na;
 } WRECTMAPS;
 typedef struct {
-  unsigned char red[256];
-  unsigned char green[256];
-  unsigned char blue[256];
+  int red[256];
+  int green[256];
+  int blue[256];
   unsigned char *data;
   int width;
   int height;
@@ -51,8 +44,10 @@ typedef struct {
   int r2;
 } HYPHENINFO;
 typedef struct {
-  int c1, c2;
-  int r1, r2;
+  int c1;
+  int c2;
+  int r1;
+  int r2;
   int rowbase;
   int gap;
   int gapblank;
@@ -66,15 +61,25 @@ typedef struct {
 } TEXTROW;
 typedef struct {
   TEXTROW *textrow;
-  int n, na;
+  int n;
+  int na;
 } TEXTROWS;
 typedef struct {
-  int r1, r2;
-  int c1, c2;
+  int r1;
+  int r2;
+  int c1;
+  int c2;
   TEXTROWS textrows;
   TEXTROW bbox;
   WRECTMAPS *wrectmaps;
-  K2PAGEBREAKMARKS *k2pagebreakmarks;
+  struct {
+    int n;
+    struct {
+      int row;
+      int col;
+      int type;
+    } k2pagebreakmark[32];
+  } *k2pagebreakmarks;
   int k2pagebreakmarks_allocated;
   int bgcolor;
   int dpi;
@@ -94,13 +99,13 @@ typedef struct {
 } PAGEREGION;
 typedef struct {
   PAGEREGION *pageregion;
-  int n, na;
+  int n;
+  int na;
 } PAGEREGIONS;
 struct KOPTContext {
   int trim;
   int wrap;
-  int white_threshold;
-  int paint_white_threshold;
+  int white;
   int indent;
   int rotate;
   int columns;
@@ -127,10 +132,10 @@ struct KOPTContext {
   int precache;
   int debug;
   int cjkchar;
-  BOXA *rboxa;
-  NUMA *rnai;
-  BOXA *nboxa;
-  NUMA *nnai;
+  BOXA* rboxa;
+  NUMA* rnai;
+  BOXA* nboxa;
+  NUMA* nnai;
   WRECTMAPS rectmaps;
   PAGEREGIONS pageregions;
   BBox bbox;
@@ -142,18 +147,20 @@ typedef struct KOPTContext KOPTContext;
 void bmp_init(WILLUSBITMAP *);
 void bmp_free(WILLUSBITMAP *);
 int bmp_alloc(WILLUSBITMAP *);
-int bmp_bytewidth(WILLUSBITMAP *);
 int bmp_copy(WILLUSBITMAP *, WILLUSBITMAP *);
+unsigned char *bmp_rowptr_from_top(WILLUSBITMAP *, int);
 void wrectmaps_init(WRECTMAPS *);
 void wrectmaps_free(WRECTMAPS *);
 int wrectmap_inside(WRECTMAP *, int, int);
 void k2pdfopt_get_reflowed_word_boxes(KOPTContext *, WILLUSBITMAP *, int, int, int, int);
 void k2pdfopt_get_native_word_boxes(KOPTContext *, WILLUSBITMAP *, int, int, int, int);
-int k2pdfopt_tocr_single_word(WILLUSBITMAP *, int, int, int, int, int, char *, int, char *, char *, int, int, int);
+void k2pdfopt_tocr_single_word(WILLUSBITMAP *, int, int, int, int, char *, int, char *, char *, int, int, int);
 void k2pdfopt_reflow_bmp(KOPTContext *);
-void k2pdfopt_tocr_end(void);
+void k2pdfopt_tocr_end();
+void pageregions_init(PAGEREGIONS *);
+void pageregions_free(PAGEREGIONS *);
 void k2pdfopt_crop_bmp(KOPTContext *);
 void k2pdfopt_optimize_bmp(KOPTContext *);
 void pixmap_to_bmp(WILLUSBITMAP *, unsigned char *, int);
-PIX *bitmap2pix(WILLUSBITMAP *, int, int, int, int);
+PIX* bitmap2pix(WILLUSBITMAP *, int, int, int, int);
 ]]

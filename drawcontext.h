@@ -17,16 +17,13 @@
 */
 #ifndef _DRAWCONTEXT_H
 #define _DRAWCONTEXT_H
-#include <stdbool.h>
 
 typedef struct DrawContext {
 	int rotate;
 	double zoom;
 	double gamma;
-	double saturation;
 	int offset_x;
 	int offset_y;
-    bool background_cleanup;
 } DrawContext;
 
 #endif

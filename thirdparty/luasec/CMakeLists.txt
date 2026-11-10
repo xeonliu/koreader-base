@@ -1,41 +1,45 @@
-list(APPEND PATCH_FILES
-    visibility.patch
-    # Prefer our CA bundle.
-    ca_bundle.patch
-    # Check SSL certificate matches hostname.
-    check_hostname.patch
-    # Enable SSL verification by default.
-    default_verify.patch
-)
+PROJECT(luasec)
+cmake_minimum_required(VERSION 2.8.3)
 
-list(APPEND CMAKE_ARGS
-    -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
-    -DBUILD_SHARED_LIBS=$<NOT:$<BOOL:${MONOLIBTIC}>>
-)
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_LIST_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
+include("koreader_thirdparty_git")
 
-if(PSP)
-    # TLS comes from pspdev's wolfSSL through its OpenSSL compatibility layer (<openssl/...> headers installed by the
-    # `libressl` stand-in project): its configuration (OPENSSL_EXTRA...) lives in <wolfssl/options.h>.
-    list(APPEND PATCH_FILES wolfssl.patch)
-    list(APPEND CMAKE_ARGS "-DCMAKE_C_FLAGS=${CFLAGS} -include ${BASE_DIR}/toolchain/psp/include/psp_luasec_compat.h")
+enable_language(C)
+
+assert_var_defined(CC)
+assert_var_defined(LD)
+assert_var_defined(INC_PATH)
+assert_var_defined(LIB_PATH)
+assert_var_defined(LUAPATH)
+
+ep_get_source_dir(SOURCE_DIR)
+
+set(BUILD_CMD_STR "$(MAKE) CC=\"${CC}\" LD=\"${LD}\" AR=\"${AR}\" RANLIB=\"${RANLIB}\" INC_PATH=\"${INC_PATH}\" LIB_PATH=\"${LIB_PATH}\" LUAPATH=\"${LUAPATH}\" LUACPATH=\"${LUAPATH}\"")
+if(DEFINED LIBS)
+    set(BUILD_CMD_STR "${BUILD_CMD_STR} LIBS=\"${LIBS}\"")
 endif()
-
-list(APPEND BUILD_CMD COMMAND ninja)
-
-if(MONOLIBTIC)
-    append_install_commands(INSTALL_CMD ssl.a DESTINATION ${STAGING_DIR}/lib)
+if ($ENV{DARWIN})
+    set(INSTALL_CMD sh -c "${BUILD_CMD_STR} --silent macosx install")
+    set(BUILD_CMD sh -c "${BUILD_CMD_STR} --silent macosx")
 else()
-    append_binary_install_command(INSTALL_CMD ssl.so DESTINATION common)
+    set(INSTALL_CMD sh -c "${BUILD_CMD_STR} --silent linux install")
+    set(BUILD_CMD sh -c "${BUILD_CMD_STR} --silent linux")
 endif()
-append_install_commands(INSTALL_CMD ${SOURCE_DIR}/src/ssl.lua DESTINATION common)
-append_install_commands(INSTALL_CMD ${SOURCE_DIR}/src/https.lua DESTINATION common/ssl)
 
-external_project(
-    DOWNLOAD GIT bf4770833c0f1b3a45f116f2f29168d67d0ce7a0 # v1.3.2-15-gbf47708
-    https://github.com/lunarmodules/luasec
-    PATCH_OVERLAY overlay
-    PATCH_FILES ${PATCH_FILES}
-    CMAKE_ARGS ${CMAKE_ARGS}
+ko_write_gitclone_script(
+    GIT_CLONE_SCRIPT_FILENAME
+    https://github.com/brunoos/luasec
+    luasec-0.7
+    ${SOURCE_DIR}
+)
+
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -P ${GIT_CLONE_SCRIPT_FILENAME}
+    BUILD_IN_SOURCE 1
+    CONFIGURE_COMMAND ""
     BUILD_COMMAND ${BUILD_CMD}
     INSTALL_COMMAND ${INSTALL_CMD}
 )

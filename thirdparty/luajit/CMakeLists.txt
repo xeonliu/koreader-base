@@ -1,129 +1,88 @@
-# Build in source tree.
-set(BINARY_DIR ${SOURCE_DIR})
+PROJECT(luajit)
+cmake_minimum_required(VERSION 2.8.3)
 
-list(APPEND PATCH_FILES koreader-luajit-makefile-tweaks.patch)
-# Enable table.pack & table.unpack w/o the rest of the -DLUAJIT_ENABLE_LUA52COMPAT baggage...
-list(APPEND PATCH_FILES koreader-luajit-enable-table_pack.patch)
-# Add libc flavor through `ffi.libc`.
-list(APPEND PATCH_FILES ffi.libc.patch)
+SET(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_modules")
+include("koreader_thirdparty_common")
+include("koreader_thirdparty_git")
 
-if(PSP)
-    # LuaJIT does not support the PSP out of the box: psp-gcc targets MIPS EABI (not o32) and the
-    # Allegrex FPU is single-precision only. Accept the ABI and force the soft-float interpreter.
-    list(APPEND PATCH_FILES psp-eabi-softfp.patch)
-endif()
+enable_language(C)
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    # Debugging is a go!
-    list(APPEND PATCH_CMD COMMAND ${ISED} "s|#CCDEBUG= -g|CCDEBUG= -g|" src/Makefile)
+ep_get_source_dir(SOURCE_DIR)
+assert_var_defined(XCOMPILE)
+
+if($ENV{KODEBUG})
+    # Debugging is go!
+    set(DBG_CMD "${ISED} 's|#CCDEBUG= -g|CCDEBUG= -g|' ${SOURCE_DIR}/src/Makefile")
     # To-do: make this auto-trigger when Valgrind is installed
-    #list(APPEND PATCH_CMD COMMAND ${ISED} "s|#XCFLAGS+= -DLUAJIT_USE_VALGRIND|XCFLAGS+= -DLUAJIT_USE_VALGRIND|" src/Makefile)
-    if(DEFINED ENV{KODEBUG_LUAJIT_USE_SYSMALLOC})
+    #set(DBG_CMD "${DBG_CMD} && ${ISED} 's|#XCFLAGS+= -DLUAJIT_USE_VALGRIND|XCFLAGS+= -DLUAJIT_USE_VALGRIND|' ${SOURCE_DIR}/src/Makefile")
+    if($ENV{KODEBUG_LUAJIT_USE_SYSMALLOC})
         # Could this be helpful on Android?
-        list(APPEND PATCH_CMD COMMAND ${ISED} "s|#XCFLAGS+= -DLUAJIT_USE_SYSMALLOC|XCFLAGS+= -DLUAJIT_USE_SYSMALLOC|" src/Makefile)
+        set(DBG_CMD "${DBG_CMD} && ${ISED} 's|#XCFLAGS+= -DLUAJIT_USE_SYSMALLOC|XCFLAGS+= -DLUAJIT_USE_SYSMALLOC|' ${SOURCE_DIR}/src/Makefile")
     endif()
     # Performance impact; not recommended unless required for something specific
-    if(DEFINED ENV{KODEBUG_LUAJIT})
-        list(APPEND PATCH_CMD COMMAND ${ISED} "s|#XCFLAGS+= -DLUAJIT_USE_GDBJIT|XCFLAGS+= -DLUAJIT_USE_GDBJIT|" src/Makefile)
-        list(APPEND PATCH_CMD COMMAND ${ISED} "s|#XCFLAGS+= -DLUA_USE_APICHECK|XCFLAGS+= -DLUA_USE_APICHECK|" src/Makefile)
-        list(APPEND PATCH_CMD COMMAND ${ISED} "s|#XCFLAGS+= -DLUA_USE_ASSERT|XCFLAGS+= -DLUA_USE_ASSERT|" src/Makefile)
+    if($ENV{KODEBUG_LUAJIT})
+        set(DBG_CMD "${DBG_CMD} && ${ISED} 's|#XCFLAGS+= -DLUAJIT_USE_GDBJIT|XCFLAGS+= -DLUAJIT_USE_GDBJIT|' ${SOURCE_DIR}/src/Makefile")
+        set(DBG_CMD "${DBG_CMD} && ${ISED} 's|#XCFLAGS+= -DLUA_USE_APICHECK|XCFLAGS+= -DLUA_USE_APICHECK|' ${SOURCE_DIR}/src/Makefile")
+        set(DBG_CMD "${DBG_CMD} && ${ISED} 's|#XCFLAGS+= -DLUA_USE_ASSERT|XCFLAGS+= -DLUA_USE_ASSERT|' ${SOURCE_DIR}/src/Makefile")
     endif()
+
+    set(BUILD_CMD_STR "${DBG_CMD} && $(MAKE) -j${PARALLEL_JOBS}")
+else()
+    set(BUILD_CMD_STR "$(MAKE) -j${PARALLEL_JOBS}")
 endif()
 
-if(EMULATE_READER)
-    append_autotools_vars(BUILD_ARGS)
-    list(APPEND BUILD_ARGS TARGET_STRIP=true)
-else()
+if(${XCOMPILE})
+    assert_var_defined(HOST_CFLAGS)
+    assert_var_defined(CC)
     assert_var_defined(BASE_CFLAGS)
-    assert_var_defined(HOSTCC)
-    assert_var_defined(HOSTCFLAGS)
+    assert_var_defined(HOST_CFLAGS)
+    assert_var_defined(TARGET_SONAME)
+    assert_var_defined(TARGET_CFLAGS)
+    assert_var_defined(CROSS)
 
-    # To recap, the LuaJIT's build system sets:
-    # - various variables from CROSS+CC, so we need to override them
-    #   all, or our CC with an absolute path will break the build.
-    # - its HOST/TARGET_CFLAGS based on CFLAGS, so we need a neutral
-    #   CFLAGS without arch.
-
-    # Add -m32 when cross compile on 64 bit host for 32bit target,
-    # (Per: http://luajit.org/install.html#cross).
+    # To recap: build its TARGET_CC from CROSS+CC, so we need HOSTCC in CC.
+    # Build its HOST/TARGET_CFLAGS based on CFLAGS, so we need
+    # a neutral CFLAGS without arch
     execute_process(
-        COMMAND sh -c "${HOSTCC} -dumpmachine"
+        COMMAND "${CC}" -dumpmachine
         OUTPUT_VARIABLE HOST_CC_MACHINE
     )
-    if((HOST_CC_MACHINE MATCHES "^.+64-.+$") AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES ".+64$"))
-        set(HOST_CC "${HOSTCC} -m32")
+    if(HOST_CC_MACHINE MATCHES "^x86_64*")
+        # Add -m32 when cross compile on 64 bit host for 32bit target, Per:
+        # http://luajit.org/install.html#cross
+        set(HOST_CC "${CC} -m32")
     else()
-        set(HOST_CC ${HOSTCC})
+        set(HOST_CC "${CC}")
     endif()
 
-    set(EXTRA_XCFLAGS)
-    if(PSP)
-        # NOTE: these must go through XCFLAGS, so that the host-side generators see them too.
-        set(EXTRA_XCFLAGS "-DLUAJIT_DISABLE_JIT -DLUAJIT_USE_SYSMALLOC -DLUAJIT_NO_UNWIND -DLUAJIT_SECURITY_PRNG=0 -DLUAJIT_MIPS_NO_ABICALLS")
+    set(BUILD_CMD_STR "${BUILD_CMD_STR} CC=\"${CC}\" HOST_CC=\"${HOST_CC}\"")
+    set(BUILD_CMD_STR "${BUILD_CMD_STR} CFLAGS=\"${BASE_CFLAGS}\" HOST_CFLAGS=\"${HOST_CFLAGS}\"")
+    if(DEFINED LDFLAGS)
+        set(BUILD_CMD_STR "${BUILD_CMD_STR} LDFLAGS=\"${LDFLAGS}\"")
     endif()
-
-    list(APPEND BUILD_ARGS
-        CC=false
-        CROSS=${CHOST}-
-        CFLAGS=${BASE_CFLAGS}
-        DYNAMIC_CC=${CC}
-        LDFLAGS=
-        HOST_CC=${HOST_CC}
-        HOST_CFLAGS=${HOSTCFLAGS}
-        HOST_LDFLAGS=
-        "TARGET_AR=${AR} rcus"
-        STATIC_CC=${CC}
-        "TARGET_CFLAGS=${CFLAGS} -DLUAJIT_SECURITY_STRHASH=0 -DLUAJIT_SECURITY_STRID=0"
-        "XCFLAGS=${EXTRA_XCFLAGS}"
-        TARGET_LD=${CC}
-        TARGET_LDFLAGS=${LDFLAGS}
-        TARGET_RANLIB=${RANLIB}
-        TARGET_SHLDFLAGS=${LDFLAGS}
-        TARGET_STRIP=${STRIP}
-    )
-    if(PSP)
-        # No JIT (soft-float doubles; no executable memory handling), no mmap/dlopen/getrandom: use the system allocator.
-        list(APPEND BUILD_ARGS TARGET_SYS=PSP BUILDMODE=static)
-    elseif(ANDROID)
-        list(APPEND BUILD_ARGS TARGET_SYS=Linux)
-    elseif(WIN32)
-        list(APPEND BUILD_ARGS TARGET_SYS=Windows)
+    if(DEFINED TARGET_SYS)
+        set(BUILD_CMD_STR "${BUILD_CMD_STR} TARGET_SYS=\"${TARGET_SYS}\"")
     endif()
-    list(APPEND BUILD_ARGS TARGET_STRIP=true)
+    set(BUILD_CMD_STR "${BUILD_CMD_STR} TARGET_SONAME=\"${TARGET_SONAME}\" TARGET_CFLAGS=\"${TARGET_CFLAGS}\" TARGET_FLAGS=\"-DLUAJIT_NO_LOG2 -DLUAJIT_NO_EXP2\" CROSS=\"${CROSS}\" amalg")
 endif()
 
-if(APPLE)
-    set(DYLIBNAME libluajit${LIB_EXT})
-    list(APPEND BUILD_ARGS TARGET_DYLIBPATH=@rpath/${DYLIBNAME} INSTALL_DYLIBNAME=${DYLIBNAME})
-else()
-    set(SONAME libluajit${LIB_EXT})
-    list(APPEND BUILD_ARGS TARGET_SONAME=${SONAME} INSTALL_SONAME=${SONAME})
-endif()
+set(BUILD_CMD sh -c "${BUILD_CMD_STR}")
 
-list(APPEND BUILD_ARGS LJ_LIBC_NAME=${LIBC_TYPE})
-
-list(APPEND BUILD_CMD COMMAND make ${BUILD_ARGS} amalg)
-
-list(APPEND INSTALL_CMD COMMAND make ${BUILD_ARGS} install PREFIX=${STAGING_DIR})
-
-if(NOT SKIP_LUAJIT_BIN)
-    append_binary_install_command(INSTALL_CMD ${STAGING_DIR}/bin/luajit)
-endif()
-
-if(USE_LUAJIT_LIB)
-    append_shared_lib_install_commands(INSTALL_CMD luajit)
-else()
-    # Prevent LUA modules from linking with the LuaJIT library.
-    list(APPEND INSTALL_CMD COMMAND ${ISED} "s|-l\${libname}||" ${STAGING_DIR}/lib/pkgconfig/luajit.pc)
-endif()
-
-append_tree_install_commands(INSTALL_CMD src/jit jit)
-
-external_project(
-    DOWNLOAD GIT ea9eb7edb5eac4a9d175d74523db34fac0fa5180
+ko_write_gitclone_script(
+    GIT_CLONE_SCRIPT_FILENAME
     https://github.com/LuaJIT/LuaJIT
-    PATCH_FILES ${PATCH_FILES}
-    PATCH_COMMAND ${PATCH_CMD}
+    0a9ff94c4a1fcec2c310dcb092da694f23186e23
+    ${SOURCE_DIR}
+)
+
+include(ExternalProject)
+ExternalProject_Add(
+    ${PROJECT_NAME}
+    DOWNLOAD_COMMAND ${CMAKE_COMMAND} -P ${GIT_CLONE_SCRIPT_FILENAME}
+    BUILD_IN_SOURCE 1
+    # skip configure
+    CONFIGURE_COMMAND ""
     BUILD_COMMAND ${BUILD_CMD}
-    INSTALL_COMMAND ${INSTALL_CMD}
+    # skip install
+    INSTALL_COMMAND ""
 )

@@ -1,8 +1,0 @@
-[Desktop Entry]
-Version = 1.5
-Type = Application
-NoDisplay = true
-Name = kotasync
-Icon = kotasync
-Exec = kotasync
-Categories = Development

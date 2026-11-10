@@ -1,28 +1,6 @@
 local util = require("ffi/util")
 local lfs = require("libs/libkoreader-lfs")
 
-local function waitForSubProcessDone(pid)
-    for i = 1, 40 do -- 1 second
-        util.usleep(25000)
-        if util.isSubProcessDone(pid) then
-            return true
-        end
-    end
-    return false
-end
-
-local function waitForData(fd_or_luafile)
-    local available = 0
-    for i = 1, 40 do -- 1 second
-        util.usleep(25000)
-        available = util.getNonBlockingReadSize(fd_or_luafile) or 0
-        if available ~= 0 then
-            return available
-        end
-    end
-    return available
-end
-
 describe("util module", function()
     describe("util.gettime", function()
 
@@ -132,25 +110,23 @@ describe("util module", function()
 
     describe("util.copyFile", function()
         local sample_pdf = "spec/base/unit/data/simple.pdf"
+        local output_pdf = "spec/base/unit/data/test_util_copy.pdf"
 
         it("should copy properly", function()
-            local tmp_f = os.tmpname()
             local from_f = io.open(sample_pdf, "r")
             local from_data = from_f:read("*a")
-            util.copyFile(sample_pdf, tmp_f)
-            local to_f = io.open(tmp_f, "r")
+            util.copyFile(sample_pdf, output_pdf)
+            local to_f = io.open(output_pdf, "r")
             local to_data = to_f:read("*a")
             assert.equals(from_data, to_data)
             from_f:close()
             to_f:close()
-            os.remove(tmp_f)
+            os.remove(output_pdf)
         end)
 
         it("fail at non-exists files", function()
-            local tmp_f = os.tmpname()
-            local err = util.copyFile("/tmp/abc/123/foo/bar/baz/777.pkg", tmp_f)
+            local err = util.copyFile("/tmp/abc/123/foo/bar/baz/777.pkg", output_pdf)
             assert.is_not_nil(err)
-            os.remove(tmp_f)
         end)
     end)
 
@@ -160,24 +136,6 @@ describe("util module", function()
             assert.equals(util.joinPath("/abc/123/", "bar"), "/abc/123/bar")
             assert.equals(util.joinPath("/123/", "/bar"), "/bar")
             assert.equals(util.joinPath("/tmp", "bar.pdf"), "/tmp/bar.pdf")
-        end)
-    end)
-
-    describe("util.df", function()
-        it("should report a filesystem's size, free and available space", function()
-            local total, free, available = util.df(".")
-            assert.is_number(total)
-            assert.is_true(total > 0)
-            -- Free space cannot exceed the filesystem, and what is available to
-            -- an unprivileged user cannot exceed what is free.
-            assert.is_true(free <= total)
-            assert.is_true(available <= free)
-        end)
-
-        it("should error out on a non-existent path", function()
-            local ok, err = util.df("/tmp/123/abc/567/foobar")
-            assert.is_nil(ok)
-            assert.is_not_nil(err)
         end)
     end)
 
@@ -205,84 +163,90 @@ describe("util module", function()
 
     describe("util.getNonBlockingReadSize", function()
         it("should read pipe when data is available", function()
-            local std_out = io.popen("sleep 0.1; echo 'done'; sleep 0.1", "r")
-            assert.are.equal(0, util.getNonBlockingReadSize(std_out))
-            assert.are.equal(5, waitForData(std_out))
+            local std_out = io.popen("sleep 3; echo 'done'", "r")
+            assert.are.equal(util.getNonBlockingReadSize(std_out), 0)
+            util.sleep(1)
+            assert.are.equal(util.getNonBlockingReadSize(std_out), 0)
+            util.sleep(1)
+            assert.are.equal(util.getNonBlockingReadSize(std_out), 0)
+            util.sleep(2)
+            assert.are.equal(util.getNonBlockingReadSize(std_out), 5)
             local startsec = util.gettime()
             local data = std_out:read("*all")
             local donesec = util.gettime()
-            assert.are.equal("done\n", data)
+            assert.are.equal(data, "done\n")
             assert.is_true(donesec - startsec <= 1)
         end)
     end)
 
     describe("util.runInSubProcess and related", function()
-        it("should run usleep 100000 in subprocess", function()
+        it("should run sleep 1 in subprocess", function()
             local var = "var_set_in_parent"
             local pid = util.runInSubProcess(function()
               var = "var_overriden_in_child"
-              util.usleep(100000)
+              util.sleep(1)
             end)
-            assert.is_true(pid ~= 0)
+            assert.truthy(pid)
             assert.is_false(util.isSubProcessDone(pid))
-            assert.is_true(waitForSubProcessDone(pid))
+            util.sleep(2)
+            assert.is_true(util.isSubProcessDone(pid))
             assert.is.same(var, "var_set_in_parent")
         end)
         it("should write a file in subprocess", function()
-            local tmp_f = os.tmpname()
+            os.remove("/tmp/test_subprocess1.txt")
             local pid = util.runInSubProcess(function()
-                local f = io.open(tmp_f, "w")
+                util.sleep(1)
+                local f = io.open("/tmp/test_subprocess1.txt", "w")
                 if f then
                     f:write("test1")
                     f:close()
                 end
             end)
-            assert.is_true(pid ~= 0)
-            assert.is_true(waitForSubProcessDone(pid))
-            local f = io.open(tmp_f)
+            assert.truthy(pid)
+            assert.is_false(util.isSubProcessDone(pid))
+            util.sleep(2)
+            assert.is_true(util.isSubProcessDone(pid))
+            local f = io.open("/tmp/test_subprocess1.txt")
             assert.is_not_nil(f)
             local data = f:read("*all")
             f:close()
             assert.is.same(data, "test1")
-            os.remove(tmp_f)
+            os.remove("/tmp/test_subprocess1.txt")
         end)
-        it("should not modify a file in subprocess as we kill it before", function()
-            local tmp_f = os.tmpname()
-            local f
-            f = io.open(tmp_f, "w")
-            if f then
-                f:write("test1")
-                f:close()
-            end
+        it("should not write a file in subprocess as we kill it before", function()
+            os.remove("/tmp/test_subprocess2.txt")
             local pid = util.runInSubProcess(function()
-                util.sleep(2)
-                f = io.open(tmp_f, "w")
+                util.sleep(3)
+                local f = io.open("/tmp/test_subprocess2.txt", "w")
                 if f then
                     f:write("test2")
                     f:close()
                 end
             end)
-            assert.is_true(pid ~= 0)
+            assert.truthy(pid)
             assert.is_false(util.isSubProcessDone(pid))
-            util.usleep(100000)
+            util.sleep(1)
             util.terminateSubProcess(pid)
-            assert.is_true(waitForSubProcessDone(pid))
-            f = io.open(tmp_f)
-            assert.is_not_nil(f)
-            local data = f:read("*all")
-            f:close()
-            assert.is.same(data, "test1")
-            os.remove(tmp_f)
+            util.sleep(1)
+            assert.is_true(util.isSubProcessDone(pid))
+            local f = io.open("/tmp/test_subprocess2.txt")
+            os.remove("/tmp/test_subprocess2.txt")
+            assert.is_nil(f)
         end)
         it("should read data from subprocess via pipe", function()
             local pid, parent_fd = util.runInSubProcess(function(pid, child_fd)
+                util.sleep(1)
                 util.writeToFD(child_fd, "test3", true)
             end, true)
-            assert.is_true(pid ~= 0)
+            assert.truthy(pid)
             assert.truthy(parent_fd)
+            assert.is_false(util.isSubProcessDone(pid))
+            util.sleep(2)
+            assert.is_true(util.getNonBlockingReadSize(parent_fd) ~= 0)
             local data = util.readAllFromFD(parent_fd, true)
             assert.is.same(data, "test3")
-            assert.is_true(waitForSubProcessDone(pid))
+            util.sleep(1)
+            assert.is_true(util.isSubProcessDone(pid))
         end)
     end)
 

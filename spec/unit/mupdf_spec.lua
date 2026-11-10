@@ -2,12 +2,10 @@ local sample_pdf = "spec/base/unit/data/Alice.pdf"
 local paper_pdf = "spec/base/unit/data/Paper.pdf"
 local password_pdf = "spec/base/unit/data/testdocument.pdf"
 local simple_pdf = "spec/base/unit/data/simple.pdf"
+local simple_pdf_out = "/tmp/simple-out.pdf"
 local simple_pdf_compare = "spec/base/unit/data/simple-out.pdf"
-local simple_pdf_annotated_compare = "spec/base/unit/data/simple-out-annotated.pdf"
-local simple_pdf_annotation_deleted_compare = "spec/base/unit/data/simple-out-annotation-deleted.pdf"
 local test_img = "spec/base/unit/data/sample.jpg"
 local jbig2_pdf = "spec/base/unit/data/2col.jbig2.pdf"
-local saturation_test_pdf = "spec/base/unit/data/saturation.pdf"
 local aes_encrypted_zip = "spec/base/unit/data/encrypted-aes.zip"
 local none_encrypted_zip = "spec/base/unit/data/encrypted-none.zip"
 local plain_encrypted_zip = "spec/base/unit/data/encrypted-plain.zip"
@@ -25,6 +23,15 @@ describe("mupdf module", function()
         local doc = M.openDocument(sample_pdf)
         assert.is_not_nil(doc)
         doc:close()
+    end)
+
+    it("should open and close 1000 PDFs", function()
+        local t = {}
+        for i = 1, 1000 do
+            t[i] = M.openDocument(sample_pdf)
+            assert.is_not_nil(t[i])
+            t[i]:close()
+        end
     end)
 
     it("should render jbig2 PDFs", function()
@@ -64,14 +71,7 @@ describe("mupdf module", function()
 
     describe("PDF document API", function()
         local doc1, doc2, doc3
-        local ffi
-        local annotation_quadpoints
         setup(function()
-            ffi = require("ffi")
-            annotation_quadpoints = ffi.new("fz_quad[1]", {{
-                { 70,  930, 510,  930 },
-                { 510,  970, 70,  970 }
-            }})
             doc1 = M.openDocument(sample_pdf)
             assert.is_not_nil(doc1)
             doc2 = M.openDocument(paper_pdf)
@@ -111,73 +111,39 @@ describe("mupdf module", function()
             assert.is_not_nil(doc3:openPage(1))
         end)
         it("should open a page 1000x", function()
-            for i = 1, 1000 do
+            for i = 1,1000 do
                 assert.is_not_nil(doc3:openPage(1))
             end
         end)
         it("should open a page, add an annotation and write a new document", function()
+            local ffi = require("ffi")
             local doc = M.openDocument(simple_pdf)
             assert.is_not_nil(doc)
             local page = doc:openPage(1)
             assert.is_not_nil(page)
-            page:addMarkupAnnotation(annotation_quadpoints, 1, ffi.C.PDF_ANNOT_HIGHLIGHT)
+            page:addMarkupAnnotation(ffi.new("float[8]", {
+                 70,  930,
+                510,  930,
+                510,  970,
+                 70,  970 }),
+                1, ffi.C.PDF_ANNOT_HIGHLIGHT)
             page:close()
-            local out_pdf = os.getenv("KO_HOME") .. "/simple-out.pdf"
-            doc:writeDocument(out_pdf)
-            doc:close()
+            doc:writeDocument(simple_pdf_out)
+            local out_f = io.open(simple_pdf_out, "r")
+            out_f:read("*a")
+            out_f:close()
             assert.is_equal(
-                md5.sumFile(out_pdf),
+                md5.sumFile(simple_pdf_out),
                 md5.sumFile(simple_pdf_compare)
             )
-            os.remove(out_pdf)
-        end)
-        it("should open a page, add an annotation, delete it again, and write a new document", function()
-            local doc = M.openDocument(simple_pdf)
-            assert.is_not_nil(doc)
-            local page = doc:openPage(1)
-            assert.is_not_nil(page)
-            local out_pdf = os.getenv("KO_HOME") .. "/simple-out-annotation-deleted.pdf"
-            doc:writeDocument(out_pdf)
-            page:addMarkupAnnotation(annotation_quadpoints, 1, ffi.C.PDF_ANNOT_HIGHLIGHT)
-            local annot = page:getMarkupAnnotation(annotation_quadpoints, 1)
-            page:deleteAnnotation(annot)
-            page:close()
-            doc:writeDocument(out_pdf)
-            doc:close()
-            assert.is_equal(
-                md5.sumFile(out_pdf),
-                md5.sumFile(simple_pdf_annotation_deleted_compare)
-            )
-            os.remove(out_pdf)
-        end)
-        it("should open a page, add contents to an existing annotation and write a new document", function()
-            local doc = M.openDocument(simple_pdf_compare)
-            assert.is_not_nil(doc)
-            local page = doc:openPage(1)
-            assert.is_not_nil(page)
-            local annot = page:getMarkupAnnotation(annotation_quadpoints, 1)
-            page:updateMarkupAnnotation(annot, "annotation contents")
-            page:close()
-            local out_pdf = os.getenv("KO_HOME") .. "/simple-out-annotated.pdf"
-            doc:writeDocument(out_pdf)
-            doc:close()
-            assert.is_equal(
-                md5.sumFile(out_pdf),
-                md5.sumFile(simple_pdf_annotated_compare)
-            )
-            os.remove(out_pdf)
         end)
 
         describe("PDF page API", function()
             local page
             local dc
             setup(function()
-                doc3:authenticatePassword("test")
                 page = doc3:openPage(2)
                 dc = require("ffi/drawcontext").new()
-            end)
-            teardown(function()
-            page:close()
             end)
             it("should get page size", function()
                 assert.are.same({page:getSize(dc)}, {612, 792})
@@ -188,7 +154,7 @@ describe("mupdf module", function()
                 assert.equals(math.floor(bbox[1]*1000), 56145)
                 assert.equals(math.floor(bbox[2]*1000), 69233)
                 assert.equals(math.floor(bbox[3]*1000), 144790)
-                assert.equals(math.floor(bbox[4]*1000), 103669)
+                assert.equals(math.floor(bbox[4]*1000), 106089)
             end)
             it("should get page text", function()
                 local text = page:getPageText()
@@ -223,44 +189,25 @@ describe("mupdf module", function()
             end)
         end)
     end)
-
     describe("image API", function()
         it("should render an image", function()
             local img = M.renderImageFile(test_img)
             assert.is_not_nil(img)
             img:free()
         end)
-    end)
-
-    it("should adjust saturation", function()
-        local BB = require("ffi/blitbuffer")
-        local doc = M.openDocument(saturation_test_pdf)
-        assert.is_not_nil(doc)
-        doc:setColorRendering(true)
-        local page = doc:openPage(1)
-        local dc = require("ffi/drawcontext").new()
-        local bb = BB.new(800, 600, BB.TYPE_BBRGB24)
-        page:draw(dc, bb, 0, 0)
-        local original = bb:getPixel(50, 50):getColorRGB24()
-        dc:setSaturation(1.6)
-        page:draw(dc, bb, 0, 0)
-        local saturated = bb:getPixel(50, 50):getColorRGB24()
-        assert.True(original ~= saturated)
-        doc:close()
-    end)
-
-    it("should open document from text", function()
-        local doc = M.openDocumentFromText([[
-        <html>
-          <head>
-            <title>Testing</title>
-          </head>
-          <body>
-            <h1>Header</h1>
-            <p>Lorem ipsum.</p>
-          <hr>
-          </body>
-        </html>]], "html", "spec/base/unit/data")
-        doc:close()
+        it("should render an image, 10 times", function()
+            for i = 1, 10 do
+                local img = M.renderImageFile(test_img)
+                assert.is_not_nil(img)
+                img:free()
+            end
+        end)
+        it("should render an image, 1000 times", function()
+            for i = 1, 1000 do
+                local img = M.renderImageFile(test_img)
+                assert.is_not_nil(img)
+                img:free()
+            end
+        end)
     end)
 end)

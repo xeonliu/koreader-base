@@ -1,4 +1,4 @@
-## koreader-base [![CircleCI](https://circleci.com/gh/koreader/koreader-base.svg?style=svg)](https://circleci.com/gh/koreader/koreader-base)
+## koreader-base [![Build Status][travis-icon]][travis-link]
 
 This is the base framework for creating document readers like KOReader,
 an e-ink device oriented reader application for various document formats.
@@ -19,17 +19,12 @@ Follow these steps:
 * automatically fetch thirdparty sources with Makefile:
   * make sure you have `patch`, `wget`, `unzip`, `git` and `svn` installed
   * run `make fetchthirdparty`.
-* run `make TARGET=kindlehf` For kindle models running FW >= 5.16.3 (Paperwhite 4 and later)
 
-* or run `make TARGET=kindlepw2` For Kindle models >= Paperwhite 2.
+* run `make TARGET=kindlepw2` For Kindle models >= Paperwhite 2.
 
-* or run `make TARGET=kindle` For Kindle models >= Kindle 4 < Paperwhite 2.
+* run `make TARGET=kindle` For Kindle models >= Kindle 4 < Paperwhite 2.
 
-* or run `make TARGET=kindle-legacy` for Kindle DXG/2/3 devices.
-
-* or run `make TARGET=kobov5` for Kobo/Tolino devices runing FW >= 5.x
-
-* or run `make TARGET=kobov4` for Mk.7 & up Kobo devices running FW 4.x
+* run `make TARGET=kindle-legacy` for Kindle DXG/2/3 devices.
 
 * or run `make TARGET=kobo` for Kobo devices.
 
@@ -43,9 +38,9 @@ Follow these steps:
 
 * or run `make TARGET=generic-arm` for generic ARM devices.
 
-* or run `make TARGET=appimage` for the desktop AppImage.
+* or run `make TARGET=ubuntu-touch` for Ubuntu Touch.
 
-* or run `make TARGET=debian`, `debian-armel` or `debian-armhf` for a Debian package.
+* or run `make TARGET=appimage` for the desktop AppImage.
 
 * or run `make KODEBUG=1` to build with debugging symbols.
 
@@ -54,13 +49,13 @@ Follow these steps:
 ## Use ccache
 
 Ccache can speed up recompilation by caching previous compilations and detecting
-when the same compilation is being repeated. In other words, it will decrease
-build time when the sources have already been built. Ccache support has been added to
-KOReader's build system. Before using it, you will need to install a ccache in your
+when the same compilation is being done again. In other words, it will decrease
+build time when the source have been built. Ccache support has been added to
+KOReader's build system. Before using it, you need to install a ccache in your
 system.
 
-* in Ubuntu use:`sudo apt-get install ccache`
-* in Fedora use:`sudo yum install ccache`
+* in ubuntu use:`sudo apt-get install ccache`
+* in fedora use:`sudo yum install ccache`
 * install from source:
   * get latest ccache source from http://ccache.samba.org/download.html
   * unarchieve the source package in a directory
@@ -75,7 +70,7 @@ Device emulation
 
 The code also features a device emulation. You need SDL headers and library
 for this. It allows to develop on a standard PC and saves precious development
-time. It might also create a suboptimal desktop PDF viewer, depending
+time. It might also compose the most unfriendly desktop PDF reader, depending
 on your view.
 
 If you are using Fedora Core Linux, run `yum install SDL2 SDL2-devel`.
@@ -117,3 +112,6 @@ variable to the number of milliseconds you want the flash to endure:
 ```
 EMULATE_READER_FLASH=100
 ```
+
+[travis-icon]:https://travis-ci.org/koreader/koreader-base.png?branch=master
+[travis-link]:https://travis-ci.org/koreader/koreader-base
