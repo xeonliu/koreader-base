@@ -75,10 +75,11 @@ endif
 # CMake build interface. {{{
 
 ifdef PSP
-$(PSP_POSIX_LIB): $(KOR_BASE)/toolchain/psp/src/psp_posix.c
+$(PSP_POSIX_LIB): $(KOR_BASE)/toolchain/psp/src/psp_posix.c $(KOR_BASE)/toolchain/psp/src/psp_net_compat.c
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $(dir $@)psp_posix.o
-	$(AR) rcs $@ $(dir $@)psp_posix.o
+	$(CC) $(CFLAGS) -c $(KOR_BASE)/toolchain/psp/src/psp_net_compat.c -o $(dir $@)psp_net_compat.o
+	$(AR) rcs $@ $(dir $@)psp_posix.o $(dir $@)psp_net_compat.o
 endif
 
 setup $(BUILD_ENTRYPOINT): $(CMAKE_KOVARS) $(CMAKE_TCF) $(MESON_CROSS_TOOLCHAIN) $(MESON_HOST_TOOLCHAIN) $(if $(PSP),$(PSP_POSIX_LIB))

@@ -12,6 +12,8 @@ list(APPEND PATCH_FILES
     no_linux_only_apis.patch
     # Only declare the cdefs we need and use our `ffi.posix_h` module.
     fix_cdefs.patch
+    # No child processes on some platforms (the PSP): don't require io.popen for platform detection.
+    no_popen_platform.patch
 )
 
 # Drop unused stuff, including the 7 years-old copy of a CA bundle that turbo doesn't actually use..
