@@ -172,7 +172,12 @@ local haveSDL2 = nil
 
 function util.haveSDL2()
 	if haveSDL2 == nil then
-		haveSDL2 = pcall(ffi.load, "SDL2")
+		if ffi.os == "Other" then
+			-- Sony PSP: everything is statically linked (ffi.load never fails) and only SDL 1.2 is available.
+			haveSDL2 = false
+		else
+			haveSDL2 = pcall(ffi.load, "SDL2")
+		end
 	end
 	return haveSDL2
 end
