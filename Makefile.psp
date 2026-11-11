@@ -112,3 +112,37 @@ $(OUT)/data/cr3.css: $(CRE_SRC)/.fetched $(TOP)/thirdparty/kpvcrlib/cr3.css
 	mkdir -p $(OUT)/data
 	cp -r $(CRE_SRC)/cr3gui/data/*.css $(CRE_SRC)/cr3gui/data/hyph $(OUT)/data/
 	cp $(TOP)/thirdparty/kpvcrlib/cr3.css $@
+
+# --- mupdf.prx: MuPDF 1.13 (PDF, XPS, CBZ, the HTML widget) + wrap-mupdf.c -------------------------------------------
+# FreeType, libjpeg and zlib come from the launcher; jbig2dec, openjpeg, lcms2 and MuPDF's own HarfBuzz are inside.
+# Fonts are loaded from fonts/ (external_fonts.patch + NOBUILTINFONT); encrypted ZIP support is left out.
+MUPDF_TAG := 1.13.0
+MUPDF_SRC := $(OUT)/src/mupdf
+SYSINC := $(OUT)/sysinc
+MUPDF_XCFLAGS := $(BASE_CFLAGS) -fno-strict-aliasing -DFZ_PLOTTERS_CMYK=0 -DFZ_ENABLE_JS=0 -DNOBUILTINFONT -I$(SYSINC)/freetype2 -I$(SYSINC)
+MUPDF_NOSYS := SYS_LIBJPEG_LIBS= SYS_ZLIB_LIBS= SYS_FREETYPE_LIBS= SYS_HARFBUZZ_LIBS= SYS_OPENJPEG_LIBS= SYS_JBIG2DEC_LIBS=
+.PHONY: mupdf
+mupdf: $(MOD)/mupdf.prx
+# Only the headers of the libraries the launcher provides (PREBUILT/include also has a newer MuPDF's headers).
+$(SYSINC)/.done:
+	mkdir -p $(SYSINC)
+	for h in zlib.h zconf.h jpeglib.h jconfig.h jmorecfg.h jerror.h freetype2; do ln -sfn $(PRE_INC)/$$h $(SYSINC)/$$h; done
+	touch $@
+$(MUPDF_SRC)/.fetched:
+	rm -rf $(MUPDF_SRC) && mkdir -p $(OUT)/src
+	git clone -q --depth 1 -b $(MUPDF_TAG) https://github.com/ArtifexSoftware/mupdf.git $(MUPDF_SRC)
+	cd $(MUPDF_SRC) && git submodule -q update --init --depth 1 thirdparty/jbig2dec thirdparty/harfbuzz thirdparty/lcms2 thirdparty/openjpeg thirdparty/mujs
+	cd $(MUPDF_SRC) && patch -N -p1 < $(TOP)/thirdparty/mupdf/external_fonts.patch && patch -N -p1 < $(TOP)/thirdparty/mupdf/libjpeg_shared.patch
+	touch $@
+$(MUPDF_SRC)/build/release/libmupdf.a: $(MUPDF_SRC)/.fetched $(SYSINC)/.done
+	$(MAKE) -C $(MUPDF_SRC) generate build=release verbose=no $(MUPDF_NOSYS)
+	$(MAKE) -C $(MUPDF_SRC) third libs build=release verbose=no CC=$(CC) AR=$(AR) XCFLAGS="$(MUPDF_XCFLAGS)" \
+	  CXX="$(CXX) -U__INT32_TYPE__ -D__INT32_TYPE__=int -U__UINT32_TYPE__ -D__UINT32_TYPE__=unsigned\ int" \
+	  MUDRAW= MUTOOL= CURL_LIB= OS=Linux FREETYPE_DIR=nonexisting JPEG_DIR=nonexisting ZLIB_DIR=nonexisting \
+	  CROSSCOMPILE=yes HAVE_X11=no HAVE_GLUT=no HAVE_PTHREAD=no
+$(OUT)/obj/mupdf/wrap-mupdf.o: $(TOP)/wrap-mupdf.c $(TOP)/wrap-mupdf.h $(MUPDF_SRC)/build/release/libmupdf.a
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I$(MUPDF_SRC)/include -I$(TOP) -c $< -o $@
+$(MOD)/mupdf.prx: $(OUT)/obj/mupdf/wrap-mupdf.o $(wildcard $(TOP)/toolchain/psp/prx/*)
+	@mkdir -p $(MOD)
+	$(MKPRX) --name mupdf --out $(MOD) --lua-dir $(TOP)/ffi -- $< $(MUPDF_SRC)/build/release/libmupdf.a $(MUPDF_SRC)/build/release/libmupdfthird.a
