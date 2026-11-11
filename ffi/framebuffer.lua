@@ -287,6 +287,11 @@ function fb:getRotationMode()
     return self.cur_rotation_mode
 end
 
+-- The screen mode that needs no rotation: "landscape" on wide screens (emulator window, PSP), "portrait" otherwise.
+function fb:getNativeScreenMode()
+    return self.native_rotation_mode == self.ORIENTATION_LANDSCAPE and "landscape" or "portrait"
+end
+
 function fb:getScreenMode()
     if self:getWidth() > self:getHeight() then
         return "landscape"

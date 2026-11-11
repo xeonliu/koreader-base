@@ -1,5 +1,9 @@
 local ffi = require("ffi")
 
+if ffi.os == "Other" and ffi.arch == "mipsel" then
+    return require("ffi/posix_h_psp") -- Sony PSP
+end
+
 ffi.cdef[[
 typedef unsigned int size_t;
 typedef long int off_t;

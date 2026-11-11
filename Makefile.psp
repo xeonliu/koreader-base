@@ -47,3 +47,68 @@ $(OUT)/lib/libkopsp.a: $(TOP)/toolchain/psp/src/psp_posix.c
 	mkdir -p $(OUT)/lib $(OUT)/obj
 	$(CC) $(CFLAGS) -c $< -o $(OUT)/obj/psp_posix.o
 	$(AR) rcs $@ $(OUT)/obj/psp_posix.o
+
+# --- C code linked into the launcher itself (always in memory) ------------------------------------------------------
+.PHONY: mainobj
+all: mainobj
+mainobj: $(OUT)/main-obj/blitbuffer.o
+$(OUT)/main-obj/blitbuffer.o: $(TOP)/blitbuffer.c $(TOP)/blitbuffer.h
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# lua-serialize (tile cache serialisation), a small C module kept in the launcher.
+SERIALIZE_REV := decd0f171cb61f3919d2441a3f0d9b3174b951e2
+mainobj: $(OUT)/main-obj/serialize.o
+$(OUT)/src/lua-serialize/.fetched:
+	rm -rf $(dir $@) && mkdir -p $(OUT)/src && git clone -q https://github.com/koreader/lua-serialize $(dir $@)
+	cd $(dir $@) && git checkout -q $(SERIALIZE_REV) && git submodule -q update --init
+	touch $@
+$(OUT)/main-obj/serialize.o: $(OUT)/src/lua-serialize/.fetched $(OUT)/lib/libluajit.a
+	mkdir -p $(dir $@)
+	cd $(OUT)/src/lua-serialize && $(CC) $(CFLAGS) -I$(OUT)/include/luajit -Ilua-compat-5.2/c-api -DLUAI_UINT32=unsigned -c serialize.c -o $@
+
+# === PRX modules (loaded on demand from modules/) ===================================================================
+MKPRX := python3 $(TOP)/toolchain/psp/prx/mkprx.py
+MOD := $(OUT)/modules
+PRE_INC := $(PREBUILT)/include
+STDCXX := $(shell $(PSPDEV)/bin/psp-g++ -print-file-name=libstdc++.a) $(shell $(PSPDEV)/bin/psp-g++ -print-file-name=libsupc++.a)
+
+# --- cre.prx: CREngine (EPUB, FB2, HTML, TXT, RTF, ...) + the Lua binding cre.cpp ------------------------------------
+# FreeType, HarfBuzz, libpng, libjpeg and zlib are not in the module: it calls the copies in the launcher.
+# CHM and MS Word (antiword) support are left out to keep the module small.
+CRE_REV := 89b0650e425013da81bc73c6d7676599d8b13c62
+NANOSVG_REV := 2b08deeb553c723d151f908d786c64136d26d576
+CRE_SRC := $(OUT)/src/crengine
+CRE_NAMES := cp_stats lvstring props lstridmap rtfimp lvmemman lvstyles crtxtenc lvtinydom lvstream lvxml chmfmt epubfmt \
+  pdbfmt wordfmt lvstsheet txtselector crtest lvbmpbuf lvfnt hyphman lvfntman lvimg crskin lvdrawbuf lvdocview \
+  lvpagesplitter lvtextfm lvrend wolutil hist cri18n crconcurrent
+CRE_OBJS := $(addprefix $(OUT)/obj/cre/,$(addsuffix .o,$(CRE_NAMES)) xxhash.o cre.o)
+CRE_DEFS := -DLINUX=1 -D_LINUX=1 -DUSE_FONTCONFIG=0 -DUSE_FREETYPE=1 -DUSE_HARFBUZZ=1 -DALLOW_KERNING=1 -DCR3_PATCH=1 -DNDEBUG=1 \
+  -DCHM_SUPPORT_ENABLED=0 -DENABLE_ANTIWORD=0 -DHAVE_PROTOTYPES -DHAVE_UNSIGNED_CHAR -DCR_EMULATE_GETTEXT \
+  -I$(CRE_SRC)/crengine/include -I$(OUT)/src/nanosvg/src -I$(PRE_INC)/freetype2 -I$(PRE_INC)/harfbuzz -I$(PRE_INC) \
+  -I$(OUT)/include/luajit
+.PHONY: cre
+cre: $(MOD)/cre.prx
+$(CRE_SRC)/.fetched:
+	rm -rf $(CRE_SRC) $(OUT)/src/nanosvg && mkdir -p $(OUT)/src
+	git clone -q https://github.com/koreader/crengine $(CRE_SRC) && cd $(CRE_SRC) && git checkout -q $(CRE_REV)
+	git clone -q https://github.com/memononen/nanosvg $(OUT)/src/nanosvg && cd $(OUT)/src/nanosvg && git checkout -q $(NANOSVG_REV)
+	touch $@
+$(OUT)/obj/cre/%.o: $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CRE_DEFS) -c $(CRE_SRC)/crengine/src/$*.cpp -o $@
+$(OUT)/obj/cre/xxhash.o: $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CRE_DEFS) -c $(CRE_SRC)/crengine/src/xxhash.c -o $@
+$(OUT)/obj/cre/cre.o: $(TOP)/cre.cpp $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CRE_DEFS) -I$(TOP) -c $< -o $@
+$(MOD)/cre.prx: $(CRE_OBJS) $(wildcard $(TOP)/toolchain/psp/prx/*)
+	@mkdir -p $(MOD)
+	$(MKPRX) --name cre --out $(MOD) --cxx $(addprefix --static-lib ,$(STDCXX)) -- $(CRE_OBJS)
+# CREngine's style sheets and hyphenation dictionaries (the frontend's data/ directory).
+cre: $(OUT)/data/cr3.css
+$(OUT)/data/cr3.css: $(CRE_SRC)/.fetched $(TOP)/thirdparty/kpvcrlib/cr3.css
+	mkdir -p $(OUT)/data
+	cp -r $(CRE_SRC)/cr3gui/data/*.css $(CRE_SRC)/cr3gui/data/hyph $(OUT)/data/
+	cp $(TOP)/thirdparty/kpvcrlib/cr3.css $@
