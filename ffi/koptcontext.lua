@@ -4,15 +4,22 @@ local C = ffi.C
 local dummy = require("ffi/koptcontext_h")
 local Blitbuffer = require("ffi/blitbuffer")
 local leptonica, k2pdfopt
-if ffi.os == "Windows" then
-    leptonica = ffi.load("libs/liblept-4.dll")
-    k2pdfopt = ffi.load("libs/libk2pdfopt-2.dll")
-elseif ffi.os == "OSX" then
-    leptonica = ffi.load("libs/liblept.4.dylib")
-    k2pdfopt = ffi.load("libs/libk2pdfopt.2.dylib")
-else
-    leptonica = ffi.load("libs/liblept.so.4")
-    k2pdfopt = ffi.load("libs/libk2pdfopt.so.2")
+local function loadLibs()
+    if ffi.os == "Windows" then
+        leptonica = ffi.load("libs/liblept-4.dll")
+        k2pdfopt = ffi.load("libs/libk2pdfopt-2.dll")
+    elseif ffi.os == "OSX" then
+        leptonica = ffi.load("libs/liblept.4.dylib")
+        k2pdfopt = ffi.load("libs/libk2pdfopt.2.dylib")
+    else
+        leptonica = ffi.load("libs/liblept.so.4")
+        k2pdfopt = ffi.load("libs/libk2pdfopt.so.2")
+    end
+end
+if not pcall(loadLibs) then
+    -- Platforms without k2pdfopt/leptonica (e.g. the PSP): documents open, without reflow, auto-crop and OCR.
+    local function unavailable() error("k2pdfopt is not available on this platform") end
+    return { unavailable = true, new = unavailable, fromtable = unavailable, totable = unavailable }
 end
 
 local KOPTContext = {

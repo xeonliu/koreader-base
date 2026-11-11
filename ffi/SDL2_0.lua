@@ -373,6 +373,8 @@ end
 
 function S.setWindowIcon(icon)
     if not icon then error("setWindowIcon: no icon path given") end
+    -- No window manager, no window icon: don't spend memory on decoding one (the PSP has little).
+    if ffi.os == "Other" then return end
 
     local Png = require("ffi/png")
     local ok, re = Png.decodeFromFile(icon)

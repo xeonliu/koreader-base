@@ -1,0 +1,148 @@
+# PSP build driver for the 2018 koreader-base (pspdev toolchain).
+#
+#   export PSPDEV=/path/to/pspdev PATH=$PSPDEV/bin:$PATH
+#   make -f Makefile.psp PREBUILT=/path/to/modern/koreader-base/build/psp/staging
+#
+# Libraries with a stable API (FreeType, HarfBuzz, libpng, libjpeg-turbo, zlib, giflib, lodepng, lpeg, lfs, ...) are
+# taken prebuilt from PREBUILT (the staging dir of the modern koreader-base PSP build). The pieces the 2018 wrappers
+# are tied to (LuaJIT with the PSP patch, CREngine, MuPDF 1.13, k2pdfopt) are built here, into build/psp/.
+
+PSPDEV ?= $(error PSPDEV is not set)
+PREBUILT ?= $(error set PREBUILT to a PSP staging directory with the prebuilt libraries)
+TOP := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+OUT := $(TOP)/build/psp
+CC := $(TOP)/toolchain/psp/psp-gcc
+CXX := $(TOP)/toolchain/psp/psp-g++
+AR := psp-ar
+BASE_CFLAGS := -O2 -G0 -mno-abicalls -fno-pic -D__PSP__ -D_PSP_FW_VERSION=661 -ffunction-sections -fdata-sections \
+  -isystem $(TOP)/toolchain/psp/include -Wno-error=incompatible-pointer-types -Wno-error=implicit-function-declaration -Wno-error=int-conversion
+CFLAGS := $(BASE_CFLAGS)
+CXXFLAGS := $(BASE_CFLAGS) -fpermissive -include $(TOP)/toolchain/psp/include/psp_compat.h
+
+.PHONY: all luajit kopsp
+all: luajit kopsp
+
+# --- LuaJIT (soft-float interpreter, FFI on, JIT off; see thirdparty/luajit/psp-eabi-softfp.patch) -----------------
+LUAJIT_REV := ea9eb7edb5eac4a9d175d74523db34fac0fa5180
+LUAJIT_DIR := $(OUT)/luajit
+LUAJIT_XCFLAGS := -DLUAJIT_DISABLE_JIT -DLUAJIT_USE_SYSMALLOC -DLUAJIT_NO_UNWIND -DLUAJIT_SECURITY_PRNG=0 -DLUAJIT_MIPS_NO_ABICALLS
+luajit: $(OUT)/lib/libluajit.a
+$(LUAJIT_DIR)/.patched:
+	rm -rf $(LUAJIT_DIR) && mkdir -p $(OUT)
+	git clone -q https://github.com/LuaJIT/LuaJIT $(LUAJIT_DIR)
+	cd $(LUAJIT_DIR) && git checkout -q $(LUAJIT_REV) && git apply $(TOP)/thirdparty/luajit/psp-eabi-softfp.patch
+	touch $@
+$(OUT)/lib/libluajit.a: $(LUAJIT_DIR)/.patched
+	$(MAKE) -C $(LUAJIT_DIR) amalg BUILDMODE=static HOST_CC="gcc -m32" CROSS=psp- CC=false \
+	  STATIC_CC=$(CC) DYNAMIC_CC=$(CC) TARGET_LD=$(CC) TARGET_AR="psp-ar rcus" TARGET_STRIP=true TARGET_SYS=PSP \
+	  XCFLAGS="$(LUAJIT_XCFLAGS)" \
+	  TARGET_CFLAGS="$(CFLAGS) -DLUAJIT_SECURITY_STRHASH=0 -DLUAJIT_SECURITY_STRID=0" LJ_LIBC_NAME=newlib || test -f $(LUAJIT_DIR)/src/libluajit.a
+	mkdir -p $(OUT)/lib $(OUT)/include/luajit
+	cp $(LUAJIT_DIR)/src/libluajit.a $@
+	cp $(LUAJIT_DIR)/src/lua.h $(LUAJIT_DIR)/src/lauxlib.h $(LUAJIT_DIR)/src/lualib.h $(LUAJIT_DIR)/src/luaconf.h $(LUAJIT_DIR)/src/luajit.h $(OUT)/include/luajit/
+
+# --- libkopsp.a: POSIX functions newlib-PSP lacks -------------------------------------------------------------------
+kopsp: $(OUT)/lib/libkopsp.a
+$(OUT)/lib/libkopsp.a: $(TOP)/toolchain/psp/src/psp_posix.c
+	mkdir -p $(OUT)/lib $(OUT)/obj
+	$(CC) $(CFLAGS) -c $< -o $(OUT)/obj/psp_posix.o
+	$(AR) rcs $@ $(OUT)/obj/psp_posix.o
+
+# --- C code linked into the launcher itself (always in memory) ------------------------------------------------------
+.PHONY: mainobj
+all: mainobj
+mainobj: $(OUT)/main-obj/blitbuffer.o
+$(OUT)/main-obj/blitbuffer.o: $(TOP)/blitbuffer.c $(TOP)/blitbuffer.h
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# lua-serialize (tile cache serialisation), a small C module kept in the launcher.
+SERIALIZE_REV := decd0f171cb61f3919d2441a3f0d9b3174b951e2
+mainobj: $(OUT)/main-obj/serialize.o
+$(OUT)/src/lua-serialize/.fetched:
+	rm -rf $(dir $@) && mkdir -p $(OUT)/src && git clone -q https://github.com/koreader/lua-serialize $(dir $@)
+	cd $(dir $@) && git checkout -q $(SERIALIZE_REV) && git submodule -q update --init
+	touch $@
+$(OUT)/main-obj/serialize.o: $(OUT)/src/lua-serialize/.fetched $(OUT)/lib/libluajit.a
+	mkdir -p $(dir $@)
+	cd $(OUT)/src/lua-serialize && $(CC) $(CFLAGS) -I$(OUT)/include/luajit -Ilua-compat-5.2/c-api -DLUAI_UINT32=unsigned -c serialize.c -o $@
+
+# === PRX modules (loaded on demand from modules/) ===================================================================
+MKPRX := python3 $(TOP)/toolchain/psp/prx/mkprx.py
+MOD := $(OUT)/modules
+PRE_INC := $(PREBUILT)/include
+STDCXX := $(shell $(PSPDEV)/bin/psp-g++ -print-file-name=libstdc++.a) $(shell $(PSPDEV)/bin/psp-g++ -print-file-name=libsupc++.a)
+
+# --- cre.prx: CREngine (EPUB, FB2, HTML, TXT, RTF, ...) + the Lua binding cre.cpp ------------------------------------
+# FreeType, HarfBuzz, libpng, libjpeg and zlib are not in the module: it calls the copies in the launcher.
+# CHM and MS Word (antiword) support are left out to keep the module small.
+CRE_REV := 89b0650e425013da81bc73c6d7676599d8b13c62
+NANOSVG_REV := 2b08deeb553c723d151f908d786c64136d26d576
+CRE_SRC := $(OUT)/src/crengine
+CRE_NAMES := cp_stats lvstring props lstridmap rtfimp lvmemman lvstyles crtxtenc lvtinydom lvstream lvxml chmfmt epubfmt \
+  pdbfmt wordfmt lvstsheet txtselector crtest lvbmpbuf lvfnt hyphman lvfntman lvimg crskin lvdrawbuf lvdocview \
+  lvpagesplitter lvtextfm lvrend wolutil hist cri18n crconcurrent
+CRE_OBJS := $(addprefix $(OUT)/obj/cre/,$(addsuffix .o,$(CRE_NAMES)) xxhash.o cre.o)
+CRE_DEFS := -DLINUX=1 -D_LINUX=1 -DUSE_FONTCONFIG=0 -DUSE_FREETYPE=1 -DUSE_HARFBUZZ=1 -DALLOW_KERNING=1 -DCR3_PATCH=1 -DNDEBUG=1 \
+  -DCHM_SUPPORT_ENABLED=0 -DENABLE_ANTIWORD=0 -DHAVE_PROTOTYPES -DHAVE_UNSIGNED_CHAR -DCR_EMULATE_GETTEXT \
+  -I$(CRE_SRC)/crengine/include -I$(OUT)/src/nanosvg/src -I$(PRE_INC)/freetype2 -I$(PRE_INC)/harfbuzz -I$(PRE_INC) \
+  -I$(OUT)/include/luajit
+.PHONY: cre
+cre: $(MOD)/cre.prx
+$(CRE_SRC)/.fetched:
+	rm -rf $(CRE_SRC) $(OUT)/src/nanosvg && mkdir -p $(OUT)/src
+	git clone -q https://github.com/koreader/crengine $(CRE_SRC) && cd $(CRE_SRC) && git checkout -q $(CRE_REV)
+	git clone -q https://github.com/memononen/nanosvg $(OUT)/src/nanosvg && cd $(OUT)/src/nanosvg && git checkout -q $(NANOSVG_REV)
+	touch $@
+$(OUT)/obj/cre/%.o: $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CRE_DEFS) -c $(CRE_SRC)/crengine/src/$*.cpp -o $@
+$(OUT)/obj/cre/xxhash.o: $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) $(CRE_DEFS) -c $(CRE_SRC)/crengine/src/xxhash.c -o $@
+$(OUT)/obj/cre/cre.o: $(TOP)/cre.cpp $(CRE_SRC)/.fetched
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(CRE_DEFS) -I$(TOP) -c $< -o $@
+$(MOD)/cre.prx: $(CRE_OBJS) $(wildcard $(TOP)/toolchain/psp/prx/*)
+	@mkdir -p $(MOD)
+	$(MKPRX) --name cre --out $(MOD) --cxx $(addprefix --static-lib ,$(STDCXX)) -- $(CRE_OBJS)
+# CREngine's style sheets and hyphenation dictionaries (the frontend's data/ directory).
+cre: $(OUT)/data/cr3.css
+$(OUT)/data/cr3.css: $(CRE_SRC)/.fetched $(TOP)/thirdparty/kpvcrlib/cr3.css
+	mkdir -p $(OUT)/data
+	cp -r $(CRE_SRC)/cr3gui/data/*.css $(CRE_SRC)/cr3gui/data/hyph $(OUT)/data/
+	cp $(TOP)/thirdparty/kpvcrlib/cr3.css $@
+
+# --- mupdf.prx: MuPDF 1.13 (PDF, XPS, CBZ, the HTML widget) + wrap-mupdf.c -------------------------------------------
+# FreeType, libjpeg and zlib come from the launcher; jbig2dec, openjpeg, lcms2 and MuPDF's own HarfBuzz are inside.
+# Fonts are loaded from fonts/ (external_fonts.patch + NOBUILTINFONT); encrypted ZIP support is left out.
+MUPDF_TAG := 1.13.0
+MUPDF_SRC := $(OUT)/src/mupdf
+SYSINC := $(OUT)/sysinc
+MUPDF_XCFLAGS := $(BASE_CFLAGS) -fno-strict-aliasing -DFZ_PLOTTERS_CMYK=0 -DFZ_ENABLE_JS=0 -DNOBUILTINFONT -I$(SYSINC)/freetype2 -I$(SYSINC)
+MUPDF_NOSYS := SYS_LIBJPEG_LIBS= SYS_ZLIB_LIBS= SYS_FREETYPE_LIBS= SYS_HARFBUZZ_LIBS= SYS_OPENJPEG_LIBS= SYS_JBIG2DEC_LIBS=
+.PHONY: mupdf
+mupdf: $(MOD)/mupdf.prx
+# Only the headers of the libraries the launcher provides (PREBUILT/include also has a newer MuPDF's headers).
+$(SYSINC)/.done:
+	mkdir -p $(SYSINC)
+	for h in zlib.h zconf.h jpeglib.h jconfig.h jmorecfg.h jerror.h freetype2; do ln -sfn $(PRE_INC)/$$h $(SYSINC)/$$h; done
+	touch $@
+$(MUPDF_SRC)/.fetched:
+	rm -rf $(MUPDF_SRC) && mkdir -p $(OUT)/src
+	git clone -q --depth 1 -b $(MUPDF_TAG) https://github.com/ArtifexSoftware/mupdf.git $(MUPDF_SRC)
+	cd $(MUPDF_SRC) && git submodule -q update --init --depth 1 thirdparty/jbig2dec thirdparty/harfbuzz thirdparty/lcms2 thirdparty/openjpeg thirdparty/mujs
+	cd $(MUPDF_SRC) && patch -N -p1 < $(TOP)/thirdparty/mupdf/external_fonts.patch && patch -N -p1 < $(TOP)/thirdparty/mupdf/libjpeg_shared.patch
+	touch $@
+$(MUPDF_SRC)/build/release/libmupdf.a: $(MUPDF_SRC)/.fetched $(SYSINC)/.done
+	$(MAKE) -C $(MUPDF_SRC) generate build=release verbose=no $(MUPDF_NOSYS)
+	$(MAKE) -C $(MUPDF_SRC) third libs build=release verbose=no CC=$(CC) AR=$(AR) XCFLAGS="$(MUPDF_XCFLAGS)" \
+	  CXX="$(CXX) -U__INT32_TYPE__ -D__INT32_TYPE__=int -U__UINT32_TYPE__ -D__UINT32_TYPE__=unsigned\ int" \
+	  MUDRAW= MUTOOL= CURL_LIB= OS=Linux FREETYPE_DIR=nonexisting JPEG_DIR=nonexisting ZLIB_DIR=nonexisting \
+	  CROSSCOMPILE=yes HAVE_X11=no HAVE_GLUT=no HAVE_PTHREAD=no
+$(OUT)/obj/mupdf/wrap-mupdf.o: $(TOP)/wrap-mupdf.c $(TOP)/wrap-mupdf.h $(MUPDF_SRC)/build/release/libmupdf.a
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -I$(MUPDF_SRC)/include -I$(TOP) -c $< -o $@
+$(MOD)/mupdf.prx: $(OUT)/obj/mupdf/wrap-mupdf.o $(wildcard $(TOP)/toolchain/psp/prx/*)
+	@mkdir -p $(MOD)
+	$(MKPRX) --name mupdf --out $(MOD) --lua-dir $(TOP)/ffi -- $< $(MUPDF_SRC)/build/release/libmupdf.a $(MUPDF_SRC)/build/release/libmupdfthird.a
