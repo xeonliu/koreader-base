@@ -690,6 +690,11 @@ function util.isAndroid()
     return isAndroid
 end
 
+--- Returns true if running on the Sony PSP (static LuaJIT build: no OS name, MIPS).
+function util.isPSP()
+    return ffi.os == "Other" and ffi.arch:sub(1, 4) == "mips"
+end
+
 function util.isPocketbook()
     return lfs.attributes("/ebrmain/pocketbook")
 end
