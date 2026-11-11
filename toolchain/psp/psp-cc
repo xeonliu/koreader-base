@@ -1,0 +1,12 @@
+#!/bin/sh
+# psp-gcc / psp-g++ wrapper: the PSP toolchain is non-PIC only (EABI), but many build systems blindly add -fPIC/-fPIE/-pthread.
+# Usage: psp-cc gcc|g++ [args...]
+tool="$1"; shift
+for a in "$@"; do
+    shift
+    case "$a" in
+        -fPIC|-fpic|-fPIE|-fpie|-pie|-pthread) ;;
+        *) set -- "$@" "$a" ;;
+    esac
+done
+exec "psp-$tool" "$@"
