@@ -225,6 +225,18 @@ function FT.newFaceSize(filename, pxsize, faceindex)
     return size
 end
 
+--- Drops the cached face of a font file, closing the file once no size object uses it anymore.
+-- Without this the file stays open until the garbage collector finalizes the face, which is too late
+-- on systems with a small limit on open files (when scanning a font directory, for instance).
+function FT.releaseFace(filename, faceindex)
+    local cache_key = string.format('%s:%d', filename, faceindex or 0)
+    local face = faces_cache[cache_key]
+    if face then
+        faces_cache[cache_key] = nil
+        done_face(face)
+    end
+end
+
 function FT.getFaceCount(filename, info)
     -- Probes number of faces available within the font file
     local success, face = pcall(new_face, filename, -1)
